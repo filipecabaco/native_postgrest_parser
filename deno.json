@@ -1,0 +1,33 @@
+{
+  "tasks": {
+    "test:wasm": "deno test --allow-read tests/integration/wasm_test.ts",
+    "test:wasm:watch": "deno test --allow-read --watch tests/integration/wasm_test.ts",
+    "example": "deno run --allow-read examples/wasm_example.ts",
+    "build:wasm": "wasm-pack build --target web --features wasm",
+    "build:wasm:dev": "wasm-pack build --dev --target web --features wasm"
+  },
+  "compilerOptions": {
+    "lib": ["deno.window"],
+    "strict": true
+  },
+  "lint": {
+    "include": ["tests/", "examples/"],
+    "rules": {
+      "tags": ["recommended"]
+    }
+  },
+  "fmt": {
+    "include": ["tests/", "examples/"],
+    "options": {
+      "useTabs": false,
+      "lineWidth": 100,
+      "indentWidth": 2,
+      "semiColons": true,
+      "singleQuote": false,
+      "proseWrap": "preserve"
+    }
+  },
+  "test": {
+    "include": ["tests/integration/"]
+  }
+}

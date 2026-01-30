@@ -1,0 +1,43 @@
+{
+  "name": "postgrest-parser",
+  "version": "0.1.0",
+  "description": "PostgREST URL-to-SQL parser with WASM bindings for TypeScript/JavaScript",
+  "main": "pkg/postgrest_parser.js",
+  "types": "postgrest_parser.d.ts",
+  "type": "module",
+  "scripts": {
+    "build": "wasm-pack build --target web --out-dir pkg",
+    "build:node": "wasm-pack build --target nodejs --out-dir pkg-node",
+    "build:bundler": "wasm-pack build --target bundler --out-dir pkg-bundler",
+    "test:wasm": "wasm-pack test --headless --firefox",
+    "example": "tsx example.ts"
+  },
+  "keywords": [
+    "postgrest",
+    "sql",
+    "parser",
+    "postgresql",
+    "wasm",
+    "typescript",
+    "query-builder"
+  ],
+  "author": "Your Name",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/your-org/postgrest-parser-rust"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "tsx": "^4.0.0"
+  },
+  "files": [
+    "pkg/**/*",
+    "postgrest_parser.d.ts",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

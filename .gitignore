@@ -1,0 +1,30 @@
+# Rust
+/target/
+Cargo.lock
+**/*.rs.bk
+*.pdb
+
+# WASM build output
+# Note: pkg/ is intentionally tracked to show example output
+# Uncomment to ignore: /pkg/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Deno
+.deno/
+
+# Testing
+*.profraw
+*.profdata
+
+# Benchmarks
+/criterion/
+
+# Logs
+*.log

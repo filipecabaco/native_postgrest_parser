@@ -1,0 +1,60 @@
+[package]
+name = "postgrest-parser"
+version = "0.1.0"
+edition = "2021"
+authors = ["Your Name"]
+license = "MIT"
+repository = "https://github.com/your-org/postgrest-parser-rust"
+description = "PostgREST URL-to-SQL parser for Rust and WASM"
+keywords = ["postgrest", "sql", "parser", "wasm", "postgresql"]
+categories = ["database", "parser-implementations", "wasm", "web-programming"]
+
+[lib]
+name = "postgrest_parser"
+crate-type = ["cdylib", "rlib"]
+
+[features]
+default = ["std"]
+std = []
+postgres = ["sqlx", "sqlx/postgres"]
+wasm = ["wasm-bindgen", "js-sys", "wasm-bindgen-futures", "console_error_panic_hook", "serde-wasm-bindgen"]
+full = ["std", "postgres"]
+
+[dependencies]
+# Core
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+thiserror = "1.0"
+
+# Parsing
+nom = "7.1"
+nom_locate = "4.2"
+peekable = "0.2"
+
+# SQL building (feature-gated)
+sqlx = { version = "0.7", features = ["postgres", "runtime-tokio"], optional = true }
+
+# WASM-specific (feature-gated)
+wasm-bindgen = { version = "0.2", optional = true }
+js-sys = { version = "0.3", optional = true }
+wasm-bindgen-futures = { version = "0.4", optional = true }
+console_error_panic_hook = { version = "0.1", optional = true }
+serde-wasm-bindgen = { version = "0.6", optional = true }
+
+[dev-dependencies]
+criterion = { version = "0.5", features = ["html_reports"] }
+proptest = "1.4"
+wasm-bindgen-test = { version = "0.3" }
+tokio = { version = "1.35", features = ["full"] }
+
+[[bench]]
+name = "parser_bench"
+harness = false
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true
+
+[package.metadata.wasm-pack.profile.release]
+wasm-opt = ["-O4", "--enable-bulk-memory", "--enable-mutable-globals", "--enable-sign-ext", "--enable-simd", "--enable-nontrapping-float-to-int"]
