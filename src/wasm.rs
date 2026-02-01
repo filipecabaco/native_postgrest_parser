@@ -345,6 +345,92 @@ pub fn parse_request_wasm(
     })
 }
 
+/// Initialize schema cache from a database query executor.
+///
+/// This function accepts a JavaScript async function that executes SQL queries
+/// and returns results. The schema introspection queries will be executed via
+/// this callback to populate the relationship cache.
+///
+/// # Arguments
+///
+/// * `query_executor` - An async JavaScript function with signature:
+///   `async (sql: string) => { rows: any[] }`
+///
+/// # Example (TypeScript with PGlite)
+///
+/// ```typescript
+/// import { PGlite } from '@electric-sql/pglite';
+/// import { initSchemaFromDb } from './pkg/postgrest_parser.js';
+///
+/// const db = new PGlite();
+///
+/// // Create query executor for WASM
+/// const queryExecutor = async (sql: string) => {
+///   const result = await db.query(sql);
+///   return { rows: result.rows };
+/// };
+///
+/// // Initialize schema from database
+/// await initSchemaFromDb(queryExecutor);
+/// ```
+#[wasm_bindgen(js_name = initSchemaFromDb)]
+pub async fn init_schema_from_db(query_executor: js_sys::Function) -> Result<(), JsValue> {
+    // Query for foreign keys from pg_catalog
+    let fk_query = r#"
+        SELECT
+            con.conname AS constraint_name,
+            sn.nspname AS from_schema,
+            sc.relname AS from_table,
+            sa.attname AS from_column,
+            tn.nspname AS to_schema,
+            tc.relname AS to_table,
+            ta.attname AS to_column
+        FROM pg_constraint con
+        JOIN pg_class sc ON sc.oid = con.conrelid
+        JOIN pg_namespace sn ON sn.oid = sc.relnamespace
+        JOIN pg_class tc ON tc.oid = con.confrelid
+        JOIN pg_namespace tn ON tn.oid = tc.relnamespace
+        JOIN pg_attribute sa ON sa.attrelid = sc.oid AND sa.attnum = con.conkey[1]
+        JOIN pg_attribute ta ON ta.attrelid = tc.oid AND ta.attnum = con.confkey[1]
+        WHERE con.contype = 'f'
+          AND sn.nspname NOT IN ('pg_catalog', 'information_schema')
+          AND array_length(con.conkey, 1) = 1
+        ORDER BY sn.nspname, sc.relname, con.conname
+    "#;
+
+    // Call the JavaScript query executor
+    let this = JsValue::null();
+    let sql_arg = JsValue::from_str(fk_query);
+    let promise = query_executor
+        .call1(&this, &sql_arg)
+        .map_err(|e| JsValue::from_str(&format!("Query executor call failed: {:?}", e)))?;
+
+    // Await the promise
+    let js_future = wasm_bindgen_futures::JsFuture::from(js_sys::Promise::from(promise));
+    let result = js_future
+        .await
+        .map_err(|e| JsValue::from_str(&format!("Query execution failed: {:?}", e)))?;
+
+    // Parse the result - expect { rows: [...] }
+    let result_obj = js_sys::Object::from(result);
+    let rows_value = js_sys::Reflect::get(&result_obj, &JsValue::from_str("rows"))
+        .map_err(|e| JsValue::from_str(&format!("Result missing 'rows' property: {:?}", e)))?;
+
+    // Deserialize rows to ForeignKey structs
+    let foreign_keys: Vec<crate::schema_cache::ForeignKey> =
+        serde_wasm_bindgen::from_value(rows_value)
+            .map_err(|e| JsValue::from_str(&format!("Failed to parse foreign keys: {}", e)))?;
+
+    // TODO: Build SchemaCache and store globally for use in SQL generation
+    // For now, just log success
+    web_sys::console::log_1(&JsValue::from_str(&format!(
+        "Schema loaded: {} foreign keys",
+        foreign_keys.len()
+    )));
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

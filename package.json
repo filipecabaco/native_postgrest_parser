@@ -6,10 +6,11 @@
   "types": "postgrest_parser.d.ts",
   "type": "module",
   "scripts": {
-    "build": "wasm-pack build --target web --out-dir pkg",
-    "build:node": "wasm-pack build --target nodejs --out-dir pkg-node",
-    "build:bundler": "wasm-pack build --target bundler --out-dir pkg-bundler",
-    "test:wasm": "wasm-pack test --headless --firefox",
+    "build": "wasm-pack build --target web --out-dir pkg -- --features wasm && cd pkg && npm install && npm run build",
+    "build:wasm": "wasm-pack build --target web --out-dir pkg -- --features wasm",
+    "build:node": "wasm-pack build --target nodejs --out-dir pkg-node -- --features wasm",
+    "build:bundler": "wasm-pack build --target bundler --out-dir pkg-bundler -- --features wasm",
+    "test:wasm": "wasm-pack test --headless --firefox -- --features wasm",
     "example": "tsx example.ts"
   },
   "keywords": [

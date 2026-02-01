@@ -124,7 +124,7 @@ pub mod error;
 pub mod parser;
 pub mod sql;
 
-#[cfg(feature = "postgres")]
+#[cfg(any(feature = "postgres", feature = "wasm"))]
 pub mod schema_cache;
 
 #[cfg(feature = "wasm")]

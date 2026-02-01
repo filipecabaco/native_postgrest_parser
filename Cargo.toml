@@ -17,7 +17,7 @@ crate-type = ["cdylib", "rlib"]
 default = ["std"]
 std = []
 postgres = ["sqlx", "sqlx/postgres"]
-wasm = ["wasm-bindgen", "js-sys", "wasm-bindgen-futures", "console_error_panic_hook", "serde-wasm-bindgen"]
+wasm = ["wasm-bindgen", "js-sys", "wasm-bindgen-futures", "console_error_panic_hook", "serde-wasm-bindgen", "web-sys"]
 full = ["std", "postgres"]
 
 [dependencies]
@@ -40,6 +40,7 @@ js-sys = { version = "0.3", optional = true }
 wasm-bindgen-futures = { version = "0.4", optional = true }
 console_error_panic_hook = { version = "0.1", optional = true }
 serde-wasm-bindgen = { version = "0.6", optional = true }
+web-sys = { version = "0.3", features = ["console"], optional = true }
 
 [dev-dependencies]
 criterion = { version = "0.5", features = ["html_reports"] }
