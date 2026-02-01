@@ -1,6 +1,59 @@
 use crate::ast::{ItemType, JsonOp, SelectItem};
 use crate::error::ParseError;
 
+/// Parses a PostgREST select clause into a list of select items.
+///
+/// Supports column selection, renaming, JSON path navigation, type casting,
+/// and nested resource embedding (relations).
+///
+/// # Syntax
+///
+/// - Columns: `col1,col2,col3`
+/// - Wildcard: `*`
+/// - Rename: `alias:column` (note: alias comes first)
+/// - JSON path: `data->key` or `data->>key`
+/// - Type cast: `price::numeric`
+/// - Nested relations: `users(id,name,posts(title))`
+/// - Spread operator: `...foreign_table(col1,col2)`
+///
+/// # Examples
+///
+/// ```
+/// use postgrest_parser::parse_select;
+///
+/// // Simple columns
+/// let items = parse_select("id,name,email").unwrap();
+/// assert_eq!(items.len(), 3);
+///
+/// // With alias (alias:field_name syntax)
+/// let items = parse_select("full_name:name,user_email:email").unwrap();
+/// assert_eq!(items.len(), 2);
+/// assert_eq!(items[0].name, "name");
+/// assert_eq!(items[0].alias, Some("full_name".to_string()));
+///
+/// // Wildcard
+/// let items = parse_select("*").unwrap();
+/// assert_eq!(items.len(), 1);
+///
+/// // JSON path
+/// let items = parse_select("data->user->name,metadata->>key").unwrap();
+/// assert_eq!(items.len(), 2);
+///
+/// // Nested relation
+/// let items = parse_select("id,name,orders(id,total,items(product_id))").unwrap();
+/// assert_eq!(items.len(), 3);
+///
+/// // Type cast
+/// let items = parse_select("price::numeric,created_at::text").unwrap();
+/// assert_eq!(items.len(), 2);
+/// ```
+///
+/// # Errors
+///
+/// Returns `ParseError` if:
+/// - Parentheses are unclosed
+/// - Relation syntax is malformed
+/// - Field names are invalid
 pub fn parse_select(select_str: &str) -> Result<Vec<SelectItem>, ParseError> {
     if select_str.is_empty() {
         return Ok(Vec::new());

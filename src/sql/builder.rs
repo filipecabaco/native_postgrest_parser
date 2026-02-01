@@ -1,19 +1,79 @@
 use crate::ast::*;
 use crate::error::SqlError;
 
+/// Result of building a SQL query with parameterized values.
+///
+/// Contains the final SQL query string, parameter values (for use with prepared statements),
+/// and a list of tables referenced in the query.
+///
+/// # SQL Injection Prevention
+///
+/// All user input is passed via parameters, never interpolated into SQL strings.
+/// This provides complete protection against SQL injection attacks.
+///
+/// # Examples
+///
+/// ```
+/// use postgrest_parser::{query_string_to_sql, QueryResult};
+///
+/// let result: QueryResult = query_string_to_sql(
+///     "users",
+///     "age=gte.18&status=eq.active&order=name.asc&limit=10"
+/// ).unwrap();
+///
+/// // SQL with parameter placeholders
+/// assert!(result.query.contains("$1"));
+/// assert!(result.query.contains("$2"));
+///
+/// // Actual parameter values (age, status, limit - order is not a param)
+/// assert_eq!(result.params.len(), 3);
+///
+/// // Tables referenced
+/// assert_eq!(result.tables, vec!["users"]);
+/// ```
 #[derive(Debug, Clone, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct QueryResult {
+    /// The generated SQL query with parameter placeholders ($1, $2, etc.)
     pub query: String,
+    /// Parameter values in order matching the placeholders
     pub params: Vec<serde_json::Value>,
+    /// List of table names referenced in the query
     pub tables: Vec<String>,
 }
 
+/// Builder for generating parameterized PostgreSQL SQL queries.
+///
+/// Converts PostgREST AST types into safe, parameterized SQL queries.
+/// All user input is placed in parameters to prevent SQL injection.
+///
+/// # Examples
+///
+/// ```
+/// use postgrest_parser::{QueryBuilder, parse_query_string};
+///
+/// let params = parse_query_string("age=gte.18&status=eq.active").unwrap();
+/// let mut builder = QueryBuilder::new();
+/// let result = builder.build_select("users", &params).unwrap();
+///
+/// assert!(result.query.contains("SELECT"));
+/// assert!(result.query.contains("WHERE"));
+/// assert_eq!(result.params.len(), 2);
+/// ```
 pub struct QueryBuilder {
+    /// The SQL query being built
     pub sql: String,
+    /// Parameter values for the query
     pub params: Vec<serde_json::Value>,
+    /// Current parameter index (for $1, $2, etc.)
     pub param_index: usize,
+    /// Tables referenced in the query
     pub tables: Vec<String>,
+    /// Optional schema cache for relation resolution
+    #[cfg(feature = "postgres")]
+    pub schema_cache: Option<std::sync::Arc<crate::schema_cache::SchemaCache>>,
+    /// Current schema being queried (for relation resolution)
+    pub current_schema: String,
 }
 
 impl Default for QueryBuilder {
@@ -23,15 +83,49 @@ impl Default for QueryBuilder {
 }
 
 impl QueryBuilder {
+    /// Creates a new empty query builder.
     pub fn new() -> Self {
         Self {
             sql: String::new(),
             params: Vec::new(),
             param_index: 0,
             tables: Vec::new(),
+            #[cfg(feature = "postgres")]
+            schema_cache: None,
+            current_schema: "public".to_string(),
         }
     }
 
+    /// Sets the schema cache for relation resolution
+    #[cfg(feature = "postgres")]
+    pub fn with_schema_cache(mut self, cache: std::sync::Arc<crate::schema_cache::SchemaCache>) -> Self {
+        self.schema_cache = Some(cache);
+        self
+    }
+
+    /// Sets the current schema
+    pub fn with_schema(mut self, schema: impl Into<String>) -> Self {
+        self.current_schema = schema.into();
+        self
+    }
+
+    /// Builds a SELECT query from parsed parameters.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use postgrest_parser::{QueryBuilder, ParsedParams, parse_filter, LogicCondition};
+    ///
+    /// let filter = parse_filter("age", "gte.21").unwrap();
+    /// let params = ParsedParams::new()
+    ///     .with_filters(vec![LogicCondition::Filter(filter)]);
+    ///
+    /// let mut builder = QueryBuilder::new();
+    /// let result = builder.build_select("users", &params).unwrap();
+    ///
+    /// assert!(result.query.contains("SELECT * FROM"));
+    /// assert!(result.query.contains("WHERE"));
+    /// ```
     pub fn build_select(
         &mut self,
         table: &str,
@@ -64,7 +158,7 @@ impl QueryBuilder {
         })
     }
 
-    fn build_select_clause(&mut self, items: &[SelectItem]) -> Result<(), SqlError> {
+    pub(crate) fn build_select_clause(&mut self, items: &[SelectItem]) -> Result<(), SqlError> {
         if items.is_empty() {
             return Err(SqlError::NoSelectItems);
         }
@@ -97,6 +191,98 @@ impl QueryBuilder {
     }
 
     fn build_relation_sql(&self, item: &SelectItem) -> Result<String, SqlError> {
+        #[cfg(feature = "postgres")]
+        let rel_table = &item.name;
+
+        #[cfg(feature = "postgres")]
+        {
+            // With schema cache: generate proper JOINs
+            if let Some(cache) = &self.schema_cache {
+                // Get current table (last in tables vec)
+                let current_table = self.tables.last().ok_or(SqlError::NoTableContext)?;
+
+                // Find relationship
+                if let Some(rel) = cache.find_relationship(&self.current_schema, current_table, rel_table) {
+                    return self.build_relation_with_fk(item, &rel);
+                } else {
+                    // No relationship found - return error with helpful message
+                    return Err(SqlError::RelationNotFound {
+                        from_table: current_table.clone(),
+                        to_table: rel_table.clone(),
+                    });
+                }
+            }
+        }
+
+        // Without schema cache: generate placeholder (won't work!)
+        // This maintains backward compatibility but produces invalid SQL
+        self.build_relation_placeholder(item)
+    }
+
+    #[cfg(feature = "postgres")]
+    fn build_relation_with_fk(&self, item: &SelectItem, rel: &crate::schema_cache::Relationship) -> Result<String, SqlError> {
+        use crate::schema_cache::RelationType;
+
+        let rel_table = &item.name;
+        let current_table = self.tables.last().unwrap();
+
+        // Build column list for the subquery
+        let column_list = if let Some(children) = &item.children {
+            children
+                .iter()
+                .filter(|c| c.item_type == ItemType::Field)
+                .map(|c| {
+                    if c.name == "*" {
+                        "*".to_string()
+                    } else {
+                        self.quote_identifier(&c.name)
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join(", ")
+        } else {
+            "*".to_string()
+        };
+
+        match rel.relation_type {
+            RelationType::ManyToOne => {
+                // orders.customer_id -> customers.id
+                // Generate: (SELECT row_to_json(c) FROM customers c WHERE c.id = orders.customer_id)
+                Ok(format!(
+                    "COALESCE((SELECT row_to_json({}_1) FROM (SELECT {} FROM {} {} WHERE {}) {}_1), 'null'::json) AS {}",
+                    rel_table,
+                    column_list,
+                    self.quote_identifier(rel_table),
+                    rel_table,
+                    rel.foreign_key.join_condition(current_table, rel_table),
+                    rel_table,
+                    self.quote_identifier(rel_table)
+                ))
+            }
+            RelationType::OneToMany => {
+                // customers.id <- orders.customer_id
+                // Generate: (SELECT COALESCE(json_agg(o), '[]') FROM orders o WHERE o.customer_id = customers.id)
+                Ok(format!(
+                    "COALESCE((SELECT json_agg({}_1) FROM (SELECT {} FROM {} {} WHERE {}) {}_1), '[]'::json) AS {}",
+                    rel_table,
+                    column_list,
+                    self.quote_identifier(rel_table),
+                    rel_table,
+                    rel.foreign_key.join_condition(rel_table, current_table),
+                    rel_table,
+                    self.quote_identifier(rel_table)
+                ))
+            }
+            RelationType::ManyToMany { junction_table } => {
+                // TODO: Implement M2M through junction tables
+                Err(SqlError::ManyToManyNotYetSupported {
+                    junction_table: junction_table.to_string(),
+                })
+            }
+        }
+    }
+
+    fn build_relation_placeholder(&self, item: &SelectItem) -> Result<String, SqlError> {
         let rel_alias = &item.name;
 
         if let Some(children) = &item.children {
@@ -160,7 +346,7 @@ impl QueryBuilder {
         }
     }
 
-    fn build_filter(&mut self, condition: &LogicCondition) -> Result<String, SqlError> {
+    pub(crate) fn build_filter(&mut self, condition: &LogicCondition) -> Result<String, SqlError> {
         match condition {
             LogicCondition::Filter(filter) => self.build_single_filter(filter),
             LogicCondition::Logic(tree) => self.build_logic_tree(tree),
@@ -195,7 +381,7 @@ impl QueryBuilder {
         }
     }
 
-    fn build_order_clause(&mut self, order_terms: &[OrderTerm]) -> Result<(), SqlError> {
+    pub(crate) fn build_order_clause(&mut self, order_terms: &[OrderTerm]) -> Result<(), SqlError> {
         let clauses: Result<Vec<String>, SqlError> = order_terms
             .iter()
             .map(|term| self.order_term_to_sql(term))
@@ -228,7 +414,7 @@ impl QueryBuilder {
         Ok(format!("{}{}{}", field_sql, dir_sql, nulls_sql))
     }
 
-    fn build_limit_offset(
+    pub(crate) fn build_limit_offset(
         &mut self,
         limit: Option<u64>,
         offset: Option<u64>,
@@ -468,7 +654,7 @@ impl QueryBuilder {
         }
     }
 
-    fn add_param(&mut self, value: serde_json::Value) -> String {
+    pub(crate) fn add_param(&mut self, value: serde_json::Value) -> String {
         let idx = self.param_index + 1;
         self.param_index = idx;
         self.params.push(value);

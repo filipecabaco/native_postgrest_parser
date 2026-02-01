@@ -91,6 +91,31 @@ pub enum ParseError {
 
     #[error("reserved key: {0}")]
     ReservedKey(String),
+
+    // Mutation-related errors
+    #[error("invalid JSON body: {0}")]
+    InvalidJsonBody(String),
+
+    #[error("invalid insert body: {0}")]
+    InvalidInsertBody(String),
+
+    #[error("empty update body")]
+    EmptyUpdateBody,
+
+    #[error("invalid update body: {0}")]
+    InvalidUpdateBody(String),
+
+    #[error("invalid on_conflict specification: {0}")]
+    InvalidOnConflict(String),
+
+    #[error("unsupported HTTP method: {0}")]
+    UnsupportedMethod(String),
+
+    #[error("invalid schema name: {0}")]
+    InvalidSchema(String),
+
+    #[error("invalid table name: {0}")]
+    InvalidTableName(String),
 }
 
 #[cfg(test)]

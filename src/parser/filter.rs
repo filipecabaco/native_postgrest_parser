@@ -4,6 +4,54 @@ use crate::error::ParseError;
 
 type OperatorValueResult = (bool, String, Option<Quantifier>, Option<String>, String);
 
+/// Parses a PostgREST filter from field and value strings.
+///
+/// Supports all 22+ PostgREST filter operators, quantifiers, negation, and full-text search.
+///
+/// # Filter Syntax
+///
+/// - Basic: `field=operator.value`
+/// - Negated: `field=not.operator.value`
+/// - Quantifiers: `field=operator(any).{val1,val2}` or `field=operator(all).{val1,val2}`
+/// - FTS: `field=fts(lang).search terms`
+/// - JSON: `data->key=operator.value` or `data->>key=operator.value`
+///
+/// # Examples
+///
+/// ```
+/// use postgrest_parser::parse_filter;
+///
+/// // Basic comparison
+/// let filter = parse_filter("age", "gte.18").unwrap();
+/// assert!(!filter.negated);
+///
+/// // Negation
+/// let filter = parse_filter("status", "not.eq.deleted").unwrap();
+/// assert!(filter.negated);
+///
+/// // Array containment
+/// let filter = parse_filter("tags", "cs.{rust,postgres}").unwrap();
+///
+/// // Quantifier with array
+/// let filter = parse_filter("tags", "eq(any).{rust,elixir}").unwrap();
+///
+/// // Full-text search
+/// let filter = parse_filter("content", "fts(english).search term").unwrap();
+///
+/// // JSON path
+/// let filter = parse_filter("data->user->name", "eq.Alice").unwrap();
+///
+/// // IS NULL
+/// let filter = parse_filter("deleted_at", "is.null").unwrap();
+/// ```
+///
+/// # Errors
+///
+/// Returns `ParseError` if:
+/// - Operator is invalid or missing
+/// - Field syntax is malformed
+/// - Quantifier is used with incompatible operator
+/// - Value format is invalid for the operator
 pub fn parse_filter(field_str: &str, value_str: &str) -> Result<Filter, ParseError> {
     let parsed_field = parse_field_string(field_str)?;
     let (negated, operator_str, quantifier, language, value) = parse_operator_value(value_str)?;
@@ -232,7 +280,7 @@ fn parse_list_value(value_str: &str, open: char, close: char) -> Result<FilterVa
 pub fn reserved_key(key: &str) -> bool {
     matches!(
         key,
-        "select" | "order" | "limit" | "offset" | "on_conflict" | "columns"
+        "select" | "order" | "limit" | "offset" | "on_conflict" | "columns" | "returning"
     )
 }
 

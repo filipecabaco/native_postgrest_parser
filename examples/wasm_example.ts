@@ -126,6 +126,176 @@ console.log("\nParameters:", example7.params);
 console.log("Tables:", example7.tables);
 console.log("\n" + "-".repeat(80) + "\n");
 
+// Example 8: Negation operators
+console.log("📝 Example 8: Negation with NOT operator\n");
+const example8 = parseQueryString(
+  "users",
+  "status=not.eq.deleted&age=not.lt.18"
+);
+
+console.log("Query String:", "status=not.eq.deleted&age=not.lt.18");
+console.log("\nGenerated SQL:");
+console.log(example8.query);
+console.log("\nParameters:", example8.params);
+console.log("\n" + "-".repeat(80) + "\n");
+
+// Example 9: Quantifiers (ANY/ALL)
+console.log("📝 Example 9: Quantifiers with arrays\n");
+const example9 = parseQueryString(
+  "posts",
+  "tags=eq(any).{rust,elixir,go}&priority=gt(all).{1,2,3}"
+);
+
+console.log("Query String:", "tags=eq(any).{rust,elixir,go}&priority=gt(all).{1,2,3}");
+console.log("\nGenerated SQL:");
+console.log(example9.query);
+console.log("\nParameters:", example9.params);
+console.log("\n" + "-".repeat(80) + "\n");
+
+// Example 10: Range operators
+console.log("📝 Example 10: Range operators (sl, sr, nxl, nxr, adj)\n");
+const example10 = parseQueryString(
+  "events",
+  "time_range=adj.[2024-01-01,2024-01-31]&duration=nxr.[100,200]"
+);
+
+console.log("Query String:", "time_range=adj.[2024-01-01,2024-01-31]&duration=nxr.[100,200]");
+console.log("\nGenerated SQL:");
+console.log(example10.query);
+console.log("\nParameters:", example10.params);
+console.log("\n" + "-".repeat(80) + "\n");
+
+// Example 11: Type casting
+console.log("📝 Example 11: Type casting with :: operator\n");
+const example11 = parseQueryString(
+  "products",
+  "price::numeric=gt.100.50&created_at::date=eq.2024-01-15"
+);
+
+console.log("Query String:", "price::numeric=gt.100.50&created_at::date=eq.2024-01-15");
+console.log("\nGenerated SQL:");
+console.log(example11.query);
+console.log("\nParameters:", example11.params);
+console.log("\n" + "-".repeat(80) + "\n");
+
+// Example 12: Pattern matching (LIKE, ILIKE, MATCH, IMATCH)
+console.log("📝 Example 12: Pattern matching operators\n");
+const example12 = parseQueryString(
+  "users",
+  "email=ilike.*@company.com&username=match.^[a-z]+$"
+);
+
+console.log("Query String:", "email=ilike.*@company.com&username=match.^[a-z]+$");
+console.log("\nGenerated SQL:");
+console.log(example12.query);
+console.log("\nParameters:", example12.params);
+console.log("\n" + "-".repeat(80) + "\n");
+
+// Example 13: IS NULL/IS TRUE/IS FALSE
+console.log("📝 Example 13: IS operator (null, true, false)\n");
+const example13 = parseQueryString(
+  "tasks",
+  "deleted_at=is.null&completed=is.true&archived=is.false"
+);
+
+console.log("Query String:", "deleted_at=is.null&completed=is.true&archived=is.false");
+console.log("\nGenerated SQL:");
+console.log(example13.query);
+console.log("\nParameters:", example13.params);
+console.log("\n" + "-".repeat(80) + "\n");
+
+// Example 14: Nested AND/OR with NOT
+console.log("📝 Example 14: Complex nested logic\n");
+const example14 = parseQueryString(
+  "products",
+  "and=(or(category.eq.electronics,category.eq.computers),not.or(status.eq.discontinued,stock.eq.0))&order=price.asc"
+);
+
+console.log("Query String:", "and=(or(category.eq.electronics,category.eq.computers),not.or(status.eq.discontinued,stock.eq.0))");
+console.log("\nGenerated SQL:");
+console.log(example14.query);
+console.log("\nParameters:", example14.params);
+console.log("\n" + "-".repeat(80) + "\n");
+
+// Example 15: Multiple orderings with nulls
+console.log("📝 Example 15: Multi-column ordering with NULLS FIRST/LAST\n");
+const example15 = parseQueryString(
+  "employees",
+  "select=id,name,salary&order=department.asc,salary.desc.nullslast,hired_at.asc.nullsfirst"
+);
+
+console.log("Query String:", "order=department.asc,salary.desc.nullslast,hired_at.asc.nullsfirst");
+console.log("\nGenerated SQL:");
+console.log(example15.query);
+console.log("\nParameters:", example15.params);
+console.log("\n" + "-".repeat(80) + "\n");
+
+// Example 16: Schema-qualified tables
+console.log("📝 Example 16: Schema-qualified table names\n");
+const example16 = parseQueryString(
+  "auth.users",
+  "email=eq.admin@example.com"
+);
+
+console.log("Query String:", "Table: auth.users, Filter: email=eq.admin@example.com");
+console.log("\nGenerated SQL:");
+console.log(example16.query);
+console.log("\nParameters:", example16.params);
+console.log("\n" + "-".repeat(80) + "\n");
+
+// Example 17: All comparison operators
+console.log("📝 Example 17: All comparison operators (eq, neq, gt, gte, lt, lte)\n");
+const example17 = parseQueryString(
+  "metrics",
+  "value=eq.100&min=neq.0&current=gt.50&target=gte.75&warning=lt.90&critical=lte.95"
+);
+
+console.log("Query String:", "Multiple comparison operators");
+console.log("\nGenerated SQL:");
+console.log(example17.query);
+console.log("\nParameters:", example17.params);
+console.log("(Should have 6 parameters)");
+console.log("\n" + "-".repeat(80) + "\n");
+
+// Example 18: Deep JSON navigation
+console.log("📝 Example 18: Deep JSON path navigation\n");
+const example18 = parseQueryString(
+  "analytics",
+  "metadata->user->profile->preferences->theme=eq.dark&stats->>total_views=gt.1000"
+);
+
+console.log("Query String:", "metadata->user->profile->preferences->theme=eq.dark");
+console.log("\nGenerated SQL:");
+console.log(example18.query);
+console.log("\nParameters:", example18.params);
+console.log("\n" + "-".repeat(80) + "\n");
+
+// Example 19: Websearch and phrase FTS
+console.log("📝 Example 19: Advanced full-text search (wfts, phfts)\n");
+const example19 = parseQueryString(
+  "documents",
+  "content=wfts(english).\"rust programming\" tutorial&title=phfts.exact phrase match"
+);
+
+console.log("Query String:", "wfts and phfts operators");
+console.log("\nGenerated SQL:");
+console.log(example19.query);
+console.log("\nParameters:", example19.params);
+console.log("\n" + "-".repeat(80) + "\n");
+
+// Example 20: All array operators
+console.log("📝 Example 20: All array operators (cs, cd, ov)\n");
+const example20 = parseQueryString(
+  "collections",
+  "tags=cs.{featured,trending}&allowed_roles=cd.{admin,moderator,user}&categories=ov.(tech,science)"
+);
+
+console.log("Query String:", "Array contains, contained by, overlaps");
+console.log("\nGenerated SQL:");
+console.log(example20.query);
+console.log("\nParameters:", example20.params);
+console.log("\n" + "-".repeat(80) + "\n");
+
 // Performance test
 console.log("⚡ Performance Test: Parsing 1000 queries\n");
 const testQuery = "select=id,name&age=gte.18&status=eq.active&limit=10";

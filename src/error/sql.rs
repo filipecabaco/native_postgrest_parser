@@ -43,6 +43,35 @@ pub enum SqlError {
 
     #[error("invalid type cast for SQL generation")]
     InvalidTypeCastForSql,
+
+    // Mutation safety errors
+    #[error("unsafe UPDATE: no WHERE clause specified. Updates without filters are not allowed for safety reasons")]
+    UnsafeUpdate,
+
+    #[error("unsafe DELETE: no WHERE clause specified. Deletes without filters are not allowed for safety reasons")]
+    UnsafeDelete,
+
+    #[error("LIMIT without ORDER BY: non-deterministic result set. Use ORDER BY when using LIMIT")]
+    LimitWithoutOrder,
+
+    #[error("no values provided for INSERT")]
+    NoInsertValues,
+
+    #[error("no SET clause for UPDATE")]
+    NoUpdateSet,
+
+    // Relation resolution errors
+    #[error("no table context for relation resolution")]
+    NoTableContext,
+
+    #[error("relation not found: no foreign key between '{from_table}' and '{to_table}'")]
+    RelationNotFound {
+        from_table: String,
+        to_table: String,
+    },
+
+    #[error("many-to-many relationships not yet supported (junction table: '{junction_table}')")]
+    ManyToManyNotYetSupported { junction_table: String },
 }
 
 #[cfg(test)]

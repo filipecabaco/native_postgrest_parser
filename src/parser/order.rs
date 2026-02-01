@@ -10,6 +10,48 @@ fn is_nulls_option(s: &str) -> bool {
     matches!(s, "nullsfirst" | "nullslast")
 }
 
+/// Parses a PostgREST order clause into a list of order terms.
+///
+/// # Syntax
+///
+/// - Single column: `column_name.asc` or `column_name.desc`
+/// - Multiple columns: `col1.asc,col2.desc,col3`
+/// - With nulls handling: `column.desc.nullsfirst` or `column.asc.nullslast`
+/// - JSON fields: `data->created_at.desc`
+/// - Type casts: `price::numeric.desc`
+///
+/// # Examples
+///
+/// ```
+/// use postgrest_parser::parse_order;
+///
+/// // Single column ascending
+/// let terms = parse_order("name.asc").unwrap();
+/// assert_eq!(terms.len(), 1);
+///
+/// // Multiple columns
+/// let terms = parse_order("created_at.desc,name.asc").unwrap();
+/// assert_eq!(terms.len(), 2);
+///
+/// // With nulls handling
+/// let terms = parse_order("updated_at.desc.nullsfirst").unwrap();
+/// assert_eq!(terms.len(), 1);
+///
+/// // JSON field ordering
+/// let terms = parse_order("data->timestamp.desc").unwrap();
+/// assert_eq!(terms.len(), 1);
+///
+/// // Default direction (ascending)
+/// let terms = parse_order("id").unwrap();
+/// assert_eq!(terms.len(), 1);
+/// ```
+///
+/// # Errors
+///
+/// Returns `ParseError` if:
+/// - Field name is invalid or empty
+/// - Direction is not `asc` or `desc`
+/// - Nulls option is not `nullsfirst` or `nullslast`
 pub fn parse_order(order_str: &str) -> Result<Vec<OrderTerm>, ParseError> {
     if order_str.is_empty() || order_str.trim().is_empty() {
         return Ok(Vec::new());
@@ -23,6 +65,17 @@ pub fn parse_order(order_str: &str) -> Result<Vec<OrderTerm>, ParseError> {
         .collect()
 }
 
+/// Parses a single order term from a string.
+///
+/// # Examples
+///
+/// ```
+/// use postgrest_parser::{parse_order_term, Direction};
+///
+/// let term = parse_order_term("created_at.desc").unwrap();
+/// assert_eq!(term.field.name, "created_at");
+/// assert_eq!(term.direction, Direction::Desc);
+/// ```
 pub fn parse_order_term(term_str: &str) -> Result<OrderTerm, ParseError> {
     let parts: Vec<&str> = term_str.split('.').collect();
 

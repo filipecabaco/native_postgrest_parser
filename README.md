@@ -19,6 +19,7 @@ A high-performance Rust implementation of the PostgREST URL-to-SQL parser, suppo
 - ✅ **Zero Regex**: Uses nom parser combinators for better performance
 - ✅ **Type Safe**: Comprehensive error handling with thiserror
 - ✅ **WASM Support**: Full TypeScript/JavaScript bindings for browser and Deno (optional feature)
+- ✅ **TypeScript Client**: Type-safe API with zero `any` types, object-based APIs, and IntelliSense
 - ✅ **171 Tests**: Comprehensive test coverage (148 Rust + 23 WASM integration tests)
 
 ## Installation
@@ -34,39 +35,397 @@ postgrest-parser = "0.1.0"
 
 ### TypeScript/JavaScript (WASM)
 
-The parser is available as a WebAssembly module for use in browsers and JavaScript runtimes.
+The parser is available as a WebAssembly module with full TypeScript support for use in browsers, Node.js, Deno, and edge runtimes.
 
-#### Building the WASM Package
+#### Quick Start for TypeScript Projects
+
+**1. Build the WASM package:**
 
 ```bash
 # Install wasm-pack if you haven't already
 cargo install wasm-pack
 
-# Build for web (browsers, Deno, etc.)
+# Build for web (browsers, Deno, Cloudflare Workers, etc.)
 wasm-pack build --target web --features wasm
 
 # Or for Node.js
 wasm-pack build --target nodejs --features wasm
 
-# Development build (faster, larger)
+# Development build (faster compilation, larger file)
 wasm-pack build --dev --target web --features wasm
 ```
 
-#### Installation in Your Project
-
-After building, the WASM package is available in the `pkg/` directory:
+**2. Copy to your TypeScript project:**
 
 ```bash
-# Copy to your project
+# Copy the entire pkg/ directory to your project
 cp -r pkg/ /path/to/your/project/postgrest-parser/
 
 # Or publish to npm (requires package.json configuration)
 cd pkg && npm publish
 ```
 
-#### Usage Examples
+**3. Import and use:**
 
-##### Basic Usage (Browser/Deno)
+> **🎉 NEW: Type-Safe Client API**
+>
+> We now provide a fully type-safe TypeScript client with zero `any` types, object-based APIs, and better IntelliSense support. See [TYPESCRIPT_GUIDE.md](docs/TYPESCRIPT_GUIDE.md) for details.
+>
+> ```typescript
+> // Recommended: Type-safe client (client.ts)
+> import { createClient } from './postgrest-parser/client.js';
+> const client = createClient();
+>
+> const result = client.select("users", {
+>   filters: { age: "gte.18", status: "eq.active" },
+>   order: ["name.asc"],
+>   limit: 10
+> });
+> // Full IntelliSense, no 'any' types, native objects
+> ```
+>
+> ```typescript
+> // Alternative: Low-level WASM API (postgrest_parser.js)
+> import init, { parseRequest } from './postgrest-parser/postgrest_parser.js';
+> await init();
+>
+> const result = parseRequest("GET", "users", "age=gte.18&limit=10", null, null);
+> // Direct WASM bindings, requires manual query string construction
+> ```
+
+#### TypeScript Integration Guide
+
+##### 1. HTTP Method Routing (Recommended Approach)
+
+The `parseRequest()` function is the **primary entry point** - it automatically routes HTTP methods to SQL operations following PostgREST conventions:
+
+```typescript
+import init, { parseRequest } from './postgrest-parser/postgrest_parser.js';
+
+await init();
+
+// GET → SELECT
+const getUsers = parseRequest(
+  "GET",
+  "users",
+  "age=gte.18&status=eq.active&order=name.asc&limit=10",
+  null,
+  null
+);
+// Generates: SELECT * FROM "users" WHERE "age" >= $1 AND "status" = $2 ORDER BY "name" ASC LIMIT $3
+
+// POST → INSERT
+const createUser = parseRequest(
+  "POST",
+  "users",
+  "returning=id,name,email",
+  JSON.stringify({ name: "Alice", email: "alice@example.com" }),
+  JSON.stringify({ Prefer: "return=representation" })
+);
+// Generates: INSERT INTO "users" ("name", "email") VALUES ($1, $2) RETURNING "id", "name", "email"
+
+// PUT → UPSERT (auto ON CONFLICT from query filters)
+const upsertUser = parseRequest(
+  "PUT",
+  "users",
+  "email=eq.alice@example.com&returning=*",
+  JSON.stringify({ email: "alice@example.com", name: "Alice Updated" }),
+  null
+);
+// Generates: INSERT ... ON CONFLICT ("email") DO UPDATE SET ... RETURNING *
+
+// PATCH → UPDATE
+const updateUser = parseRequest(
+  "PATCH",
+  "users",
+  "id=eq.123&returning=id,status",
+  JSON.stringify({ status: "verified" }),
+  null
+);
+// Generates: UPDATE "users" SET "status" = $1 WHERE "id" = $2 RETURNING "id", "status"
+
+// DELETE → DELETE
+const deleteUser = parseRequest(
+  "DELETE",
+  "users",
+  "id=eq.123&returning=id",
+  null,
+  null
+);
+// Generates: DELETE FROM "users" WHERE "id" = $1 RETURNING "id"
+
+// RPC → Function call
+const rpcResult = parseRequest(
+  "POST",
+  "rpc/calculate_total",
+  "select=total,tax",
+  JSON.stringify({ order_id: 123, tax_rate: 0.08 }),
+  null
+);
+// Generates: SELECT * FROM calculate_total($1, $2)
+```
+
+##### 2. Express.js Integration
+
+```typescript
+import express from 'express';
+import init, { parseRequest } from './postgrest-parser/postgrest_parser.js';
+import pg from 'pg';
+
+const app = express();
+const db = new pg.Pool({ connectionString: process.env.DATABASE_URL });
+
+// Initialize WASM once at startup
+await init();
+
+app.use(express.json());
+
+// Universal PostgREST-compatible endpoint
+app.all('/api/:table', async (req, res) => {
+  try {
+    const result = parseRequest(
+      req.method,
+      req.params.table,
+      new URLSearchParams(req.query).toString(),
+      req.body ? JSON.stringify(req.body) : null,
+      JSON.stringify(req.headers)
+    );
+
+    const { rows } = await db.query(result.query, result.params);
+    res.json(rows);
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+});
+
+app.listen(3000);
+```
+
+Now your API supports:
+```bash
+GET  /api/users?age=gte.18&select=id,name
+POST /api/users + body { "name": "Alice" }
+PUT  /api/users?id=eq.123 + body { "id": 123, "name": "Alice" }
+PATCH /api/users?id=eq.123 + body { "status": "active" }
+DELETE /api/users?id=eq.123
+```
+
+##### 3. Next.js API Route
+
+```typescript
+// pages/api/[table].ts
+import type { NextApiRequest, NextApiResponse } from 'next';
+import init, { parseRequest } from '@/lib/postgrest-parser/postgrest_parser.js';
+import { query } from '@/lib/db';
+
+let initialized = false;
+
+export default async function handler(req: NextApiRequest, res: NextApiResponse) {
+  if (!initialized) {
+    await init();
+    initialized = true;
+  }
+
+  const { table } = req.query;
+  const queryString = new URLSearchParams(req.query as Record<string, string>).toString();
+
+  try {
+    const result = parseRequest(
+      req.method!,
+      table as string,
+      queryString,
+      req.body ? JSON.stringify(req.body) : null,
+      JSON.stringify(req.headers)
+    );
+
+    const rows = await query(result.query, result.params);
+    res.status(200).json(rows);
+  } catch (error) {
+    res.status(400).json({ error: (error as Error).message });
+  }
+}
+```
+
+##### 4. Deno Edge Function
+
+```typescript
+// supabase/functions/postgrest-proxy/index.ts
+import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
+import init, { parseRequest } from './postgrest_parser.js';
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+
+await init();
+
+const supabase = createClient(
+  Deno.env.get('SUPABASE_URL')!,
+  Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
+);
+
+serve(async (req) => {
+  const url = new URL(req.url);
+  const path = url.pathname.slice(1);
+  const query = url.search.slice(1);
+
+  let body = null;
+  if (req.method !== 'GET' && req.method !== 'DELETE') {
+    body = await req.text();
+  }
+
+  try {
+    const result = parseRequest(
+      req.method,
+      path,
+      query,
+      body,
+      JSON.stringify(Object.fromEntries(req.headers))
+    );
+
+    const { data, error } = await supabase.rpc('execute_sql', {
+      query: result.query,
+      params: result.params
+    });
+
+    if (error) throw error;
+
+    return new Response(JSON.stringify(data), {
+      headers: { 'Content-Type': 'application/json' }
+    });
+  } catch (error) {
+    return new Response(JSON.stringify({ error: error.message }), {
+      status: 400,
+      headers: { 'Content-Type': 'application/json' }
+    });
+  }
+});
+```
+
+##### 5. Type-Safe Wrapper
+
+```typescript
+// lib/postgrest.ts
+import init, { parseRequest, WasmQueryResult } from './postgrest-parser/postgrest_parser.js';
+
+let initialized = false;
+
+async function ensureInit() {
+  if (!initialized) {
+    await init();
+    initialized = true;
+  }
+}
+
+export interface QueryOptions {
+  select?: string;
+  filters?: Record<string, string>;
+  order?: string;
+  limit?: number;
+  offset?: number;
+}
+
+export class PostgRESTClient {
+  constructor(private executeQuery: (sql: string, params: any[]) => Promise<any[]>) {}
+
+  async select(table: string, options: QueryOptions = {}): Promise<any[]> {
+    await ensureInit();
+
+    const params = new URLSearchParams();
+    if (options.select) params.set('select', options.select);
+    if (options.filters) Object.entries(options.filters).forEach(([k, v]) => params.set(k, v));
+    if (options.order) params.set('order', options.order);
+    if (options.limit) params.set('limit', String(options.limit));
+    if (options.offset) params.set('offset', String(options.offset));
+
+    const result = parseRequest('GET', table, params.toString(), null, null);
+    return this.executeQuery(result.query, result.params);
+  }
+
+  async insert(table: string, data: any | any[], returning = '*'): Promise<any[]> {
+    await ensureInit();
+
+    const result = parseRequest(
+      'POST',
+      table,
+      `returning=${returning}`,
+      JSON.stringify(data),
+      JSON.stringify({ Prefer: 'return=representation' })
+    );
+    return this.executeQuery(result.query, result.params);
+  }
+
+  async upsert(
+    table: string,
+    data: any,
+    conflictColumns: string[],
+    returning = '*'
+  ): Promise<any[]> {
+    await ensureInit();
+
+    const filters = conflictColumns.map(col => `${col}=eq.${data[col]}`).join('&');
+    const result = parseRequest(
+      'PUT',
+      table,
+      `${filters}&returning=${returning}`,
+      JSON.stringify(data),
+      null
+    );
+    return this.executeQuery(result.query, result.params);
+  }
+
+  async update(
+    table: string,
+    data: any,
+    filters: Record<string, string>,
+    returning = '*'
+  ): Promise<any[]> {
+    await ensureInit();
+
+    const params = new URLSearchParams(filters);
+    params.set('returning', returning);
+
+    const result = parseRequest('PATCH', table, params.toString(), JSON.stringify(data), null);
+    return this.executeQuery(result.query, result.params);
+  }
+
+  async delete(table: string, filters: Record<string, string>, returning = 'id'): Promise<any[]> {
+    await ensureInit();
+
+    const params = new URLSearchParams(filters);
+    params.set('returning', returning);
+
+    const result = parseRequest('DELETE', table, params.toString(), null, null);
+    return this.executeQuery(result.query, result.params);
+  }
+
+  async rpc(functionName: string, args: any = {}, returning?: string): Promise<any[]> {
+    await ensureInit();
+
+    const queryString = returning ? `returning=${returning}` : '';
+    const result = parseRequest(
+      'POST',
+      `rpc/${functionName}`,
+      queryString,
+      Object.keys(args).length > 0 ? JSON.stringify(args) : null,
+      null
+    );
+    return this.executeQuery(result.query, result.params);
+  }
+}
+
+// Usage:
+// const client = new PostgRESTClient(async (sql, params) => {
+//   const { rows } = await db.query(sql, params);
+//   return rows;
+// });
+//
+// const users = await client.select('users', {
+//   select: 'id,name,email',
+//   filters: { 'age': 'gte.18', 'status': 'eq.active' },
+//   order: 'name.asc',
+//   limit: 10
+// });
+```
+
+##### 6. Basic Usage (Browser/Deno)
 
 ```typescript
 import init, { parseQueryString } from './postgrest_parser.js';
@@ -178,50 +537,69 @@ console.log(JSON.stringify(json, null, 2));
 // }
 ```
 
-#### WASM API Reference
+#### Complete WASM API Reference
 
-##### `parseQueryString(table: string, queryString: string): WasmQueryResult`
+The WASM module provides comprehensive TypeScript/JavaScript bindings for all PostgREST operations.
 
-Parses a PostgREST query string and generates SQL.
+**📚 Full Documentation:** See [WASM_API.md](docs/WASM_API.md) for complete API reference with 40+ examples.
 
-- **Parameters:**
-  - `table` - Table name to query
-  - `queryString` - PostgREST query string (e.g., `"select=id,name&age=gte.18"`)
-- **Returns:** `WasmQueryResult` with:
-  - `query` - Generated PostgreSQL SELECT statement
-  - `params` - Array of parameter values
-  - `tables` - Array of table names referenced
-- **Throws:** Error if parsing or SQL generation fails
+**Core Functions:**
 
-##### `parseOnly(queryString: string): ParsedParams`
+| Function | Purpose | HTTP Method Equivalent |
+|----------|---------|----------------------|
+| `parseRequest(method, path, qs, body?, headers?)` | **Main entry point** - Routes HTTP methods to SQL | All methods |
+| `parseQueryString(table, queryString)` | Direct SELECT generation | GET |
+| `parseInsert(table, body, qs?, headers?)` | Direct INSERT generation | POST |
+| `parseUpdate(table, body, qs, headers?)` | Direct UPDATE generation | PATCH |
+| `parseDelete(table, qs, headers?)` | Direct DELETE generation | DELETE |
+| `parseRpc(function, body?, qs?, headers?)` | Direct RPC call | POST to rpc/* |
+| `parseOnly(queryString)` | Parse without SQL generation | N/A |
+| `buildFilterClause(filters)` | Build WHERE clause from filters | N/A |
 
-Parses query string without generating SQL.
+**Return Type:**
 
-- **Parameters:**
-  - `queryString` - PostgREST query string
-- **Returns:** Parsed parameters object
-- **Throws:** Error if parsing fails
+```typescript
+interface WasmQueryResult {
+  query: string;   // Parameterized SQL with $1, $2, ... placeholders
+  params: any[];   // Parameter values (strings, numbers, arrays, etc.)
+  tables: string[]; // Referenced table names
+}
+```
 
-##### `WasmQueryResult`
+**HTTP Method Routing:**
 
-Properties:
-- `query: string` - The SQL query
-- `params: any[]` - Query parameters
-- `tables: string[]` - Referenced tables
-- `toJSON(): object` - Serialize to JSON
+```typescript
+parseRequest("GET", path, qs)    // → SELECT
+parseRequest("POST", path, qs)   // → INSERT (or RPC if path starts with "rpc/")
+parseRequest("PUT", path, qs)    // → UPSERT (auto ON CONFLICT from filters)
+parseRequest("PATCH", path, qs)  // → UPDATE
+parseRequest("DELETE", path, qs) // → DELETE
+```
 
-#### Running Tests
+**Examples:** See [examples/wasm_mutations_example.ts](examples/wasm_mutations_example.ts) for 21 comprehensive examples covering all operations.
 
-We provide comprehensive integration tests using Deno:
+#### Running Examples and Tests
+
+**Run comprehensive examples:**
 
 ```bash
-# Install Deno
-curl -fsSL https://deno.land/install.sh | sh
-
 # Build WASM
 wasm-pack build --target web --features wasm
 
-# Run integration tests
+# Run SELECT examples (20 examples)
+deno run --allow-read examples/wasm_example.ts
+
+# Run mutation examples (21 examples: INSERT, UPDATE, DELETE, RPC, HTTP routing)
+deno run --allow-read examples/wasm_mutations_example.ts
+```
+
+**Run integration tests:**
+
+```bash
+# Install Deno (if not already installed)
+curl -fsSL https://deno.land/install.sh | sh
+
+# Run WASM integration tests
 deno test --allow-read tests/integration/wasm_test.ts
 
 # Or use the Deno task
@@ -229,6 +607,21 @@ deno task test:wasm
 ```
 
 See [tests/integration/README.md](tests/integration/README.md) for detailed test documentation.
+
+**TypeScript Type Definitions:**
+
+The WASM package includes full TypeScript definitions in `pkg/postgrest_parser.d.ts`. Your IDE will automatically provide:
+- IntelliSense/autocomplete for all functions
+- Type checking for parameters and return values
+- JSDoc documentation on hover
+
+```typescript
+import init, { parseRequest, WasmQueryResult } from './postgrest-parser/postgrest_parser.js';
+
+// TypeScript knows the exact shape of WasmQueryResult
+const result: WasmQueryResult = parseRequest("GET", "users", "age=gte.18", null, null);
+//    ^-- Type: { query: string; params: any[]; tables: string[] }
+```
 
 #### Performance
 
@@ -489,7 +882,7 @@ cargo bench
 cargo bench simple_parsing
 cargo bench realistic_workloads
 
-# See BENCHMARKS.md for detailed results and analysis
+# See docs/BENCHMARKS.md for detailed results and analysis
 ```
 
 #### Latest Benchmark Results
@@ -551,7 +944,7 @@ Benchmarked on Darwin 24.6.0 (macOS) with release optimizations.
 - Complex queries: **1.3x faster**
 - All operations under 15 µs
 
-See [BENCHMARKS.md](BENCHMARKS.md) for complete performance analysis.
+See [BENCHMARKS.md](docs/BENCHMARKS.md) for complete performance analysis.
 
 ## Complete Operator Reference
 
