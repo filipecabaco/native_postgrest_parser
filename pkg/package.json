@@ -1,0 +1,82 @@
+{
+  "name": "postgrest-parser",
+  "collaborators": [
+    "Your Name"
+  ],
+  "description": "PostgREST URL-to-SQL parser for Rust and WASM with type-safe TypeScript API",
+  "version": "0.1.0",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/your-org/postgrest-parser-rust"
+  },
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "prepublishOnly": "npm run build"
+  },
+  "files": [
+    "postgrest_parser_bg.wasm",
+    "postgrest_parser.js",
+    "postgrest_parser.d.ts",
+    "types.js",
+    "types.d.ts",
+    "client.js",
+    "client.d.ts",
+    "README.md"
+  ],
+  "main": "./postgrest_parser.js",
+  "module": "./client.js",
+  "types": "./client.d.ts",
+  "exports": {
+    ".": {
+      "types": "./client.d.ts",
+      "import": "./client.js",
+      "default": "./client.js"
+    },
+    "./wasm": {
+      "types": "./postgrest_parser.d.ts",
+      "import": "./postgrest_parser.js",
+      "default": "./postgrest_parser.js"
+    },
+    "./types": {
+      "types": "./types.d.ts",
+      "import": "./types.js",
+      "default": "./types.js"
+    },
+    "./*.wasm": {
+      "default": "./*.wasm"
+    },
+    "./package.json": "./package.json"
+  },
+  "sideEffects": [
+    "*.wasm",
+    "./postgrest_parser.js"
+  ],
+  "keywords": [
+    "postgrest",
+    "sql",
+    "parser",
+    "wasm",
+    "postgresql",
+    "typescript",
+    "type-safe",
+    "deno",
+    "bun",
+    "cloudflare-workers",
+    "edge",
+    "vite",
+    "pglite"
+  ],
+  "devDependencies": {
+    "typescript": "^5.0.0"
+  },
+  "peerDependencies": {
+    "@electric-sql/pglite": "^0.2.0"
+  },
+  "peerDependenciesMeta": {
+    "@electric-sql/pglite": {
+      "optional": true
+    }
+  }
+}
