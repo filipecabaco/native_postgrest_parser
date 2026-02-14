@@ -1,16 +1,50 @@
 name: Release
 
 on:
-  release:
-    types: [published]
+  push:
+    branches: [main]
 
 permissions:
-  contents: read
+  contents: write
   id-token: write
 
 jobs:
+  check-version:
+    name: Check version change
+    runs-on: ubuntu-22.04
+    outputs:
+      version: ${{ steps.version.outputs.current }}
+      changed: ${{ steps.version.outputs.changed }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 2
+      - name: Get current version
+        id: version
+        run: |
+          CURRENT=$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)"/\1/')
+          PREVIOUS=$(git show HEAD~1:Cargo.toml | grep '^version' | head -1 | sed 's/.*"\(.*\)"/\1/')
+          echo "current=$CURRENT" >> "$GITHUB_OUTPUT"
+          if [ "$CURRENT" != "$PREVIOUS" ]; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  create-release:
+    name: Create GitHub Release
+    needs: check-version
+    if: needs.check-version.outputs.changed == 'true'
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - run: gh release create "v${{ needs.check-version.outputs.version }}" --generate-notes
+        env:
+          GH_TOKEN: ${{ github.token }}
+
   publish-crates:
     name: Publish to crates.io
+    needs: [check-version, create-release]
     runs-on: ubuntu-22.04
     environment: release
     steps:
@@ -26,6 +60,7 @@ jobs:
 
   publish-npm:
     name: Publish to npm
+    needs: [check-version, create-release]
     runs-on: ubuntu-22.04
     environment: release
     steps:
