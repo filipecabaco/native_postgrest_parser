@@ -24,9 +24,8 @@ async fn test_customers_with_filters_and_ordering() {
     let cache = Arc::new(SchemaCache::load_from_database(&pool).await.unwrap());
 
     // Query: Get gold tier customers, ordered by name
-    let params = parse_query_string(
-        "select=id,name,email&metadata->>tier=eq.gold&order=name.asc"
-    ).unwrap();
+    let params =
+        parse_query_string("select=id,name,email&metadata->>tier=eq.gold&order=name.asc").unwrap();
 
     let mut builder = QueryBuilder::new()
         .with_schema_cache(cache)
@@ -66,7 +65,9 @@ async fn test_orders_with_customer_details() {
     // Verify SQL structure
     assert!(result.query.contains("WHERE"));
     assert!(result.query.contains("ORDER BY"));
-    assert!(result.query.contains(r#""orders"."customer_id" = "customers"."id""#));
+    assert!(result
+        .query
+        .contains(r#""orders"."customer_id" = "customers"."id""#));
 
     // Execute query
     let status_value = result.params[0].as_str().unwrap();
@@ -85,9 +86,8 @@ async fn test_customers_with_all_orders() {
     let cache = Arc::new(SchemaCache::load_from_database(&pool).await.unwrap());
 
     // Query: Get all customers with their orders (even if no orders)
-    let params = parse_query_string(
-        "select=id,name,email,orders(id,status,total_amount)&limit=10"
-    ).unwrap();
+    let params =
+        parse_query_string("select=id,name,email,orders(id,status,total_amount)&limit=10").unwrap();
 
     let mut builder = QueryBuilder::new()
         .with_schema_cache(cache)
@@ -115,9 +115,8 @@ async fn test_pagination_with_offset() {
     let cache = Arc::new(SchemaCache::load_from_database(&pool).await.unwrap());
 
     // Query: Get products with pagination
-    let params = parse_query_string(
-        "select=id,name,price&order=price.desc&limit=3&offset=2"
-    ).unwrap();
+    let params =
+        parse_query_string("select=id,name,price&order=price.desc&limit=3&offset=2").unwrap();
 
     let mut builder = QueryBuilder::new()
         .with_schema_cache(cache)
@@ -146,9 +145,7 @@ async fn test_range_filters() {
 
     // Query: Get products with price between 50 and 150 (inclusive)
     // Multiple filters on same column now work correctly!
-    let params = parse_query_string(
-        "select=id,name,price&price=gte.50&price=lte.150"
-    ).unwrap();
+    let params = parse_query_string("select=id,name,price&price=gte.50&price=lte.150").unwrap();
 
     let mut builder = QueryBuilder::new()
         .with_schema_cache(cache)
@@ -194,9 +191,8 @@ async fn test_in_operator_with_list() {
     let cache = Arc::new(SchemaCache::load_from_database(&pool).await.unwrap());
 
     // Query: Get orders with specific statuses
-    let params = parse_query_string(
-        "select=id,status,total_amount&status=in.(pending,completed)"
-    ).unwrap();
+    let params =
+        parse_query_string("select=id,status,total_amount&status=in.(pending,completed)").unwrap();
 
     let mut builder = QueryBuilder::new()
         .with_schema_cache(cache)
@@ -212,9 +208,7 @@ async fn test_in_operator_with_list() {
     // Execute query - ANY expects a Postgres array
     // Extract the array elements from serde_json::Value
     let statuses = result.params[0].as_array().unwrap();
-    let status_strs: Vec<&str> = statuses.iter()
-        .map(|v| v.as_str().unwrap())
-        .collect();
+    let status_strs: Vec<&str> = statuses.iter().map(|v| v.as_str().unwrap()).collect();
 
     let rows = sqlx::query(&result.query)
         .bind(&status_strs[..]) // Pass as slice for Postgres array
@@ -222,7 +216,10 @@ async fn test_in_operator_with_list() {
         .await
         .unwrap();
 
-    assert!(!rows.is_empty(), "Should find orders with specified statuses");
+    assert!(
+        !rows.is_empty(),
+        "Should find orders with specified statuses"
+    );
 }
 
 #[tokio::test]
@@ -232,8 +229,9 @@ async fn test_or_logic_filter() {
 
     // Query: Get products in Electronics OR Office category
     let params = parse_query_string(
-        "select=id,name,category&or=(category.eq.Electronics,category.eq.Office)"
-    ).unwrap();
+        "select=id,name,category&or=(category.eq.Electronics,category.eq.Office)",
+    )
+    .unwrap();
 
     let mut builder = QueryBuilder::new()
         .with_schema_cache(cache)
@@ -263,9 +261,7 @@ async fn test_pattern_matching() {
     let cache = Arc::new(SchemaCache::load_from_database(&pool).await.unwrap());
 
     // Query: Find products with names containing "Laptop"
-    let params = parse_query_string(
-        "select=id,name,price&name=like.*Laptop*"
-    ).unwrap();
+    let params = parse_query_string("select=id,name,price&name=like.*Laptop*").unwrap();
 
     let mut builder = QueryBuilder::new()
         .with_schema_cache(cache)
@@ -285,7 +281,11 @@ async fn test_pattern_matching() {
         .await
         .unwrap();
 
-    println!("Found {} products matching pattern '{}'", rows.len(), pattern);
+    println!(
+        "Found {} products matching pattern '{}'",
+        rows.len(),
+        pattern
+    );
 
     // Note: If no matches, the pattern conversion might not be working as expected
     // PostgREST converts *Laptop* to %Laptop% for SQL LIKE
@@ -300,9 +300,7 @@ async fn test_null_handling() {
     let cache = Arc::new(SchemaCache::load_from_database(&pool).await.unwrap());
 
     // Query: Get orders with no notes
-    let params = parse_query_string(
-        "select=id,status,notes&notes=is.null"
-    ).unwrap();
+    let params = parse_query_string("select=id,status,notes&notes=is.null").unwrap();
 
     let mut builder = QueryBuilder::new()
         .with_schema_cache(cache)
@@ -316,10 +314,7 @@ async fn test_null_handling() {
     assert!(result.query.contains("IS NULL"));
 
     // Execute query (no parameters for IS NULL)
-    let rows = sqlx::query(&result.query)
-        .fetch_all(&pool)
-        .await
-        .unwrap();
+    let rows = sqlx::query(&result.query).fetch_all(&pool).await.unwrap();
 
     println!("Found {} orders with null notes", rows.len());
 }
@@ -330,9 +325,7 @@ async fn test_junction_table_many_to_many() {
     let cache = Arc::new(SchemaCache::load_from_database(&pool).await.unwrap());
 
     // Query: Get posts (should work even though we don't fully support M2M yet)
-    let params = parse_query_string(
-        "select=id,title,published&published=eq.true"
-    ).unwrap();
+    let params = parse_query_string("select=id,title,published&published=eq.true").unwrap();
 
     let mut builder = QueryBuilder::new()
         .with_schema_cache(cache)
@@ -367,9 +360,7 @@ async fn test_one_to_one_relationship() {
     let cache = Arc::new(SchemaCache::load_from_database(&pool).await.unwrap());
 
     // Query: Get customers with their profile (1-to-1)
-    let params = parse_query_string(
-        "select=id,name,customer_profiles(bio,avatar_url)"
-    ).unwrap();
+    let params = parse_query_string("select=id,name,customer_profiles(bio,avatar_url)").unwrap();
 
     let mut builder = QueryBuilder::new()
         .with_schema_cache(cache)
@@ -380,13 +371,12 @@ async fn test_one_to_one_relationship() {
     println!("One-to-one SQL:\n{}\n", result.query);
 
     // Verify JOIN condition
-    assert!(result.query.contains(r#""customer_profiles"."customer_id" = "customers"."id""#));
+    assert!(result
+        .query
+        .contains(r#""customer_profiles"."customer_id" = "customers"."id""#));
 
     // Execute query
-    let rows = sqlx::query(&result.query)
-        .fetch_all(&pool)
-        .await
-        .unwrap();
+    let rows = sqlx::query(&result.query).fetch_all(&pool).await.unwrap();
 
     assert!(!rows.is_empty(), "Should return customers");
 }
@@ -402,8 +392,9 @@ async fn test_complex_combined_query() {
         "select=name,email,orders(id,status,total_amount)&\
          metadata->>tier=in.(gold,silver)&\
          order=name.asc&\
-         limit=5"
-    ).unwrap();
+         limit=5",
+    )
+    .unwrap();
 
     let mut builder = QueryBuilder::new()
         .with_schema_cache(cache)
@@ -417,13 +408,13 @@ async fn test_complex_combined_query() {
     assert!(result.query.contains("WHERE"));
     assert!(result.query.contains("ORDER BY"));
     assert!(result.query.contains("LIMIT"));
-    assert!(result.query.contains(r#""orders"."customer_id" = "customers"."id""#));
+    assert!(result
+        .query
+        .contains(r#""orders"."customer_id" = "customers"."id""#));
 
     // Execute query
     let tier_array = result.params[0].as_array().unwrap();
-    let tier_strs: Vec<&str> = tier_array.iter()
-        .map(|v| v.as_str().unwrap())
-        .collect();
+    let tier_strs: Vec<&str> = tier_array.iter().map(|v| v.as_str().unwrap()).collect();
     let limit_value = result.params[1].as_i64().unwrap();
 
     let rows = sqlx::query(&result.query)

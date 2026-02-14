@@ -260,8 +260,12 @@ pub fn parse_params_from_pairs(pairs: Vec<(String, String)>) -> Result<ParsedPar
     // Parse single-value parameters
     let select_str = single_value_map.get("select").map(|s| s.to_string());
     let order_str = single_value_map.get("order").map(|s| s.to_string());
-    let limit = single_value_map.get("limit").and_then(|s| s.parse::<u64>().ok());
-    let offset = single_value_map.get("offset").and_then(|s| s.parse::<u64>().ok());
+    let limit = single_value_map
+        .get("limit")
+        .and_then(|s| s.parse::<u64>().ok());
+    let offset = single_value_map
+        .get("offset")
+        .and_then(|s| s.parse::<u64>().ok());
 
     // Parse filters from pairs (supports multiple filters on same column)
     let filters = parse_filters_from_pairs(&filter_pairs)?;
@@ -568,7 +572,9 @@ pub fn operation_to_sql(table: &str, operation: &Operation) -> Result<QueryResul
             let function_name = table.strip_prefix("rpc/").unwrap_or(table);
             let resolved_table = resolve_schema(function_name, "POST", None)?;
             let mut builder = QueryBuilder::new();
-            builder.build_rpc(&resolved_table, params).map_err(Error::Sql)
+            builder
+                .build_rpc(&resolved_table, params)
+                .map_err(Error::Sql)
         }
     }
 }
@@ -629,9 +635,7 @@ fn parse_filters_from_map(
 ///
 /// Unlike parse_filters_from_map, this function processes pairs sequentially,
 /// allowing multiple filters on the same column (e.g., price=gte.50&price=lte.150).
-fn parse_filters_from_pairs(
-    pairs: &[(String, String)],
-) -> Result<Vec<LogicCondition>, Error> {
+fn parse_filters_from_pairs(pairs: &[(String, String)]) -> Result<Vec<LogicCondition>, Error> {
     let mut filters = Vec::new();
 
     for (key, value) in pairs {
@@ -911,7 +915,10 @@ mod tests {
         // Real-world: Upsert user preferences
         use std::collections::HashMap;
         let mut headers = HashMap::new();
-        headers.insert("Prefer".to_string(), "resolution=merge-duplicates".to_string());
+        headers.insert(
+            "Prefer".to_string(),
+            "resolution=merge-duplicates".to_string(),
+        );
 
         let body = r#"{"user_id": 123, "theme": "dark"}"#;
         let op = parse(
@@ -983,14 +990,7 @@ mod tests {
         headers.insert("Prefer".to_string(), "return=representation".to_string());
 
         let body = r#"{"status": "active"}"#;
-        let op = parse(
-            "PATCH",
-            "users",
-            "id=eq.123",
-            Some(body),
-            Some(&headers),
-        )
-        .unwrap();
+        let op = parse("PATCH", "users", "id=eq.123", Some(body), Some(&headers)).unwrap();
 
         match op {
             Operation::Update(_, Some(prefer)) => {
@@ -1165,7 +1165,14 @@ mod tests {
         headers.insert("Prefer".to_string(), "return=representation".to_string());
 
         let body = r#"{"amount": 100.50}"#;
-        let op = parse("POST", "rpc/process_payment", "", Some(body), Some(&headers)).unwrap();
+        let op = parse(
+            "POST",
+            "rpc/process_payment",
+            "",
+            Some(body),
+            Some(&headers),
+        )
+        .unwrap();
 
         match op {
             Operation::Rpc(params, Some(prefer)) => {
@@ -1503,8 +1510,12 @@ mod tests {
         // Columns might be in either order
         println!("SQL: {}", result.query);
         assert!(
-            result.query.contains(r#"ON CONFLICT ("post_id", "user_id")"#)
-                || result.query.contains(r#"ON CONFLICT ("user_id", "post_id")"#)
+            result
+                .query
+                .contains(r#"ON CONFLICT ("post_id", "user_id")"#)
+                || result
+                    .query
+                    .contains(r#"ON CONFLICT ("user_id", "post_id")"#)
         );
         assert!(result.query.contains("WHERE"));
         assert!(result.query.contains(r#""reaction" = EXCLUDED."reaction""#));
@@ -1525,7 +1536,14 @@ mod tests {
         headers.insert("Prefer".to_string(), "return=representation".to_string());
         headers.insert("Content-Profile".to_string(), "sales".to_string());
 
-        let op = parse("POST", "order_items", "select=*", Some(body), Some(&headers)).unwrap();
+        let op = parse(
+            "POST",
+            "order_items",
+            "select=*",
+            Some(body),
+            Some(&headers),
+        )
+        .unwrap();
         match op {
             Operation::Insert(params, Some(prefer)) => {
                 assert_eq!(
@@ -1575,7 +1593,14 @@ mod tests {
         let mut headers = HashMap::new();
         headers.insert("Prefer".to_string(), "return=representation".to_string());
 
-        let op = parse("POST", "posts", "select=id,content,user_id", Some(body), Some(&headers)).unwrap();
+        let op = parse(
+            "POST",
+            "posts",
+            "select=id,content,user_id",
+            Some(body),
+            Some(&headers),
+        )
+        .unwrap();
         match op {
             Operation::Insert(_, Some(prefer)) => {
                 assert_eq!(
@@ -1588,7 +1613,14 @@ mod tests {
 
         // 2. Upsert like with PUT
         let body = r#"{"user_id": 789, "post_id": 123}"#;
-        let op = parse("PUT", "likes", "user_id=eq.789&post_id=eq.123", Some(body), None).unwrap();
+        let op = parse(
+            "PUT",
+            "likes",
+            "user_id=eq.789&post_id=eq.123",
+            Some(body),
+            None,
+        )
+        .unwrap();
         match op {
             Operation::Insert(params, _) => {
                 assert!(params.on_conflict.is_some());
@@ -1629,7 +1661,14 @@ mod tests {
             "resolution=merge-duplicates".to_string(),
         );
 
-        let op = parse("POST", "metrics", "on_conflict=metric,date", Some(body), Some(&headers)).unwrap();
+        let op = parse(
+            "POST",
+            "metrics",
+            "on_conflict=metric,date",
+            Some(body),
+            Some(&headers),
+        )
+        .unwrap();
         match op {
             Operation::Insert(params, Some(prefer)) => {
                 assert!(params.on_conflict.is_some());
@@ -1651,7 +1690,7 @@ mod tests {
         match op {
             Operation::Rpc(params, _) => {
                 assert_eq!(params.function_name, "get_monthly_stats");
-                assert!(params.filters.len() > 0);
+                assert!(!params.filters.is_empty());
             }
             _ => panic!("Expected RPC with filters"),
         }
@@ -1680,22 +1719,64 @@ mod tests {
 
     #[test]
     fn test_embedding_many_to_one_via_fk() {
-        // select("*, profiles(username, avatar_url)") — many-to-one join
         let result = query_string_to_sql("posts", "select=*,profiles(username,avatar_url)");
         assert!(result.is_ok());
         let query = result.unwrap();
         assert!(query.query.contains("SELECT"));
         assert!(query.query.contains("profiles"));
+        // row_to_json takes a single record, not individual columns
+        assert!(
+            !query.query.contains("row_to_json(profiles.\"username\""),
+            "row_to_json must not receive individual columns: {}",
+            query.query
+        );
+        assert!(
+            query.query.contains("row_to_json("),
+            "should use row_to_json with a subquery record: {}",
+            query.query
+        );
     }
 
     #[test]
     fn test_embedding_one_to_many() {
-        // select("title, comments(id, body)") — one-to-many join
         let result = query_string_to_sql("posts", "select=title,comments(id,body)");
         assert!(result.is_ok());
         let query = result.unwrap();
         assert!(query.query.contains("\"title\""));
         assert!(query.query.contains("comments"));
+        // row_to_json takes a single record, not individual columns
+        assert!(
+            !query.query.contains("row_to_json(comments.\"id\""),
+            "row_to_json must not receive individual columns: {}",
+            query.query
+        );
+    }
+
+    #[test]
+    fn test_embedding_select_star_produces_valid_row_to_json() {
+        let result = query_string_to_sql("posts", "select=*,comments(*)");
+        assert!(result.is_ok());
+        let query = result.unwrap();
+        assert!(
+            query.query.contains("row_to_json("),
+            "should use row_to_json: {}",
+            query.query
+        );
+    }
+
+    #[test]
+    fn test_embedding_nested_produces_valid_sql() {
+        let result = query_string_to_sql(
+            "posts",
+            "select=id,comments(id,body,author:profiles(name,avatar_url))",
+        );
+        assert!(result.is_ok());
+        let query = result.unwrap();
+        assert!(
+            !query.query.contains("row_to_json(profiles.\"name\""),
+            "nested row_to_json must not receive individual columns: {}",
+            query.query
+        );
     }
 
     #[test]
@@ -1733,7 +1814,10 @@ mod tests {
         assert_eq!(relation.name, "profiles");
         assert_eq!(relation.alias, Some("author".to_string()));
         assert!(relation.hint.is_some());
-        assert_eq!(relation.hint, Some(ItemHint::Inner("author_id_fkey".to_string())));
+        assert_eq!(
+            relation.hint,
+            Some(ItemHint::Inner("author_id_fkey".to_string()))
+        );
     }
 
     #[test]
@@ -1766,7 +1850,10 @@ mod tests {
         let author = &select[3];
         assert_eq!(author.name, "profiles");
         assert_eq!(author.alias, Some("author".to_string()));
-        assert_eq!(author.hint, Some(ItemHint::Inner("author_id_fkey".to_string())));
+        assert_eq!(
+            author.hint,
+            Some(ItemHint::Inner("author_id_fkey".to_string()))
+        );
 
         // Comments with nested commenter relation
         let comments = &select[4];
@@ -1777,7 +1864,10 @@ mod tests {
         let commenter = &comment_children[3];
         assert_eq!(commenter.name, "profiles");
         assert_eq!(commenter.alias, Some("commenter".to_string()));
-        assert_eq!(commenter.hint, Some(ItemHint::Inner("commenter_id_fkey".to_string())));
+        assert_eq!(
+            commenter.hint,
+            Some(ItemHint::Inner("commenter_id_fkey".to_string()))
+        );
     }
 
     #[test]
@@ -1833,14 +1923,7 @@ mod tests {
         .is_ok());
 
         // Feature 6: ON CONFLICT (basic and advanced)
-        assert!(parse(
-            "POST",
-            "users",
-            "on_conflict=email",
-            Some(body),
-            None
-        )
-        .is_ok());
+        assert!(parse("POST", "users", "on_conflict=email", Some(body), None).is_ok());
 
         println!("✅ 100% PostgREST Parity Achieved!");
     }

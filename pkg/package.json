@@ -5,7 +5,7 @@
     "Your Name"
   ],
   "description": "PostgREST URL-to-SQL parser for Rust and WASM",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -14,11 +14,17 @@
   "files": [
     "postgrest_parser_bg.wasm",
     "postgrest_parser.js",
-    "postgrest_parser.d.ts"
+    "postgrest_parser.d.ts",
+    "postgrest_parser_bg.wasm.d.ts",
+    "client.js",
+    "client.d.ts",
+    "types.js",
+    "types.d.ts"
   ],
   "main": "postgrest_parser.js",
   "types": "postgrest_parser.d.ts",
   "sideEffects": [
+    "./postgrest_parser.js",
     "./snippets/*"
   ],
   "keywords": [
@@ -27,5 +33,23 @@
     "parser",
     "wasm",
     "postgresql"
-  ]
+  ],
+  "exports": {
+    ".": {
+      "types": "./postgrest_parser.d.ts",
+      "import": "./postgrest_parser.js",
+      "default": "./postgrest_parser.js"
+    },
+    "./client.js": {
+      "types": "./client.d.ts",
+      "import": "./client.js",
+      "default": "./client.js"
+    },
+    "./types.js": {
+      "types": "./types.d.ts",
+      "import": "./types.js",
+      "default": "./types.js"
+    },
+    "./*.wasm": "./*.wasm"
+  }
 }

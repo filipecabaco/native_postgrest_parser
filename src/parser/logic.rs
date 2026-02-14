@@ -29,13 +29,19 @@ fn parse_logic_key(key: &str) -> Result<(bool, LogicOperator), ParseError> {
         match rest {
             "and" => Ok((true, LogicOperator::And)),
             "or" => Ok((true, LogicOperator::Or)),
-            _ => Err(ParseError::InvalidLogicExpression(format!("invalid key: {}", key))),
+            _ => Err(ParseError::InvalidLogicExpression(format!(
+                "invalid key: {}",
+                key
+            ))),
         }
     } else {
         match key_lower.as_str() {
             "and" => Ok((false, LogicOperator::And)),
             "or" => Ok((false, LogicOperator::Or)),
-            _ => Err(ParseError::InvalidLogicExpression(format!("invalid key: {}", key))),
+            _ => Err(ParseError::InvalidLogicExpression(format!(
+                "invalid key: {}",
+                key
+            ))),
         }
     }
 }
@@ -265,7 +271,6 @@ fn parse_filter_field(field_str: &str) -> Result<Field, ParseError> {
         Err(_) => parse_field_fallback(field_str),
     }
 }
-
 
 #[cfg(test)]
 mod tests {

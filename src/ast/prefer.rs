@@ -149,7 +149,10 @@ mod tests {
             .with_return(ReturnRepresentation::Minimal)
             .with_count(Count::Exact);
 
-        assert_eq!(opts.return_representation, Some(ReturnRepresentation::Minimal));
+        assert_eq!(
+            opts.return_representation,
+            Some(ReturnRepresentation::Minimal)
+        );
         assert_eq!(opts.count, Some(Count::Exact));
         assert!(!opts.is_empty());
     }

@@ -1,10 +1,9 @@
+use serde::{Deserialize, Serialize};
 ///! Schema introspection and caching for relation resolution.
 ///!
 ///! This module provides database schema introspection to resolve foreign key
 ///! relationships, enabling proper JOIN generation for resource embedding.
-
 use std::collections::HashMap;
-use serde::{Deserialize, Serialize};
 
 #[cfg(feature = "postgres")]
 use sqlx::{PgPool, Row};
@@ -38,10 +37,7 @@ impl ForeignKey {
     pub fn join_condition(&self, from_alias: &str, to_alias: &str) -> String {
         format!(
             "\"{}\".\"{}\" = \"{}\".\"{}\"",
-            from_alias,
-            &self.from_column,
-            to_alias,
-            &self.to_column
+            from_alias, &self.from_column, to_alias, &self.to_column
         )
     }
 }
@@ -158,7 +154,10 @@ impl SchemaCache {
         to_table: &str,
     ) -> Option<Relationship> {
         // Try forward FK (Many-to-One): from_table has FK to to_table
-        if let Some(fks) = self.foreign_keys.get(&(from_schema.to_string(), from_table.to_string())) {
+        if let Some(fks) = self
+            .foreign_keys
+            .get(&(from_schema.to_string(), from_table.to_string()))
+        {
             if let Some(fk) = fks.iter().find(|fk| fk.to_table == to_table) {
                 return Some(Relationship {
                     from_table: from_table.to_string(),
@@ -170,7 +169,10 @@ impl SchemaCache {
         }
 
         // Try reverse FK (One-to-Many): to_table has FK to from_table
-        if let Some(fks) = self.reverse_fks.get(&(from_schema.to_string(), from_table.to_string())) {
+        if let Some(fks) = self
+            .reverse_fks
+            .get(&(from_schema.to_string(), from_table.to_string()))
+        {
             if let Some(fk) = fks.iter().find(|fk| fk.from_table == to_table) {
                 return Some(Relationship {
                     from_table: from_table.to_string(),

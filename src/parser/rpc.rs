@@ -130,10 +130,7 @@ mod tests {
 
         assert_eq!(params.function_name, "get_user_posts");
         assert_eq!(params.args.len(), 2);
-        assert_eq!(
-            params.args.get("user_id"),
-            Some(&Value::Number(123.into()))
-        );
+        assert_eq!(params.args.get("user_id"), Some(&Value::Number(123.into())));
     }
 
     #[test]

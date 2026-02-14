@@ -13,7 +13,7 @@
  *   deno run --allow-read examples/wasm_example.ts
  */
 
-import init, { parseQueryString, parseOnly } from "../pkg/postgrest_parser.js";
+import init, { parseQueryString, parseOnly } from "postgrest-parser";
 
 // Initialize WASM module
 console.log("🚀 Initializing PostgREST Parser WASM...\n");

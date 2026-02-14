@@ -1,4 +1,4 @@
-use criterion::{black_box, criterion_group, criterion_main, Criterion, BenchmarkId};
+use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
 use postgrest_parser::{parse_query_string, query_string_to_sql};
 
 /// Benchmark simple query parsing
@@ -31,7 +31,7 @@ fn bench_complex_parsing(c: &mut Criterion) {
     group.bench_function("multiple_filters", |b| {
         b.iter(|| {
             parse_query_string(black_box(
-                "age=gte.18&status=eq.active&name=like.*Smith*&created_at=gte.2024-01-01"
+                "age=gte.18&status=eq.active&name=like.*Smith*&created_at=gte.2024-01-01",
             ))
         })
     });
@@ -39,7 +39,7 @@ fn bench_complex_parsing(c: &mut Criterion) {
     group.bench_function("nested_logic", |b| {
         b.iter(|| {
             parse_query_string(black_box(
-                "and=(age.gte.18,status.eq.active,or(role.eq.admin,role.eq.moderator))"
+                "and=(age.gte.18,status.eq.active,or(role.eq.admin,role.eq.moderator))",
             ))
         })
     });
@@ -47,7 +47,7 @@ fn bench_complex_parsing(c: &mut Criterion) {
     group.bench_function("with_relations", |b| {
         b.iter(|| {
             parse_query_string(black_box(
-                "select=id,name,orders(id,total,items(name,price))"
+                "select=id,name,orders(id,total,items(name,price))",
             ))
         })
     });
@@ -148,28 +148,18 @@ fn bench_sql_generation(c: &mut Criterion) {
     let mut group = c.benchmark_group("sql_generation");
 
     group.bench_function("simple_select", |b| {
-        b.iter(|| {
-            query_string_to_sql(
-                black_box("users"),
-                black_box("select=id,name,email")
-            )
-        })
+        b.iter(|| query_string_to_sql(black_box("users"), black_box("select=id,name,email")))
     });
 
     group.bench_function("with_filters", |b| {
-        b.iter(|| {
-            query_string_to_sql(
-                black_box("users"),
-                black_box("age=gte.18&status=eq.active")
-            )
-        })
+        b.iter(|| query_string_to_sql(black_box("users"), black_box("age=gte.18&status=eq.active")))
     });
 
     group.bench_function("with_order", |b| {
         b.iter(|| {
             query_string_to_sql(
                 black_box("users"),
-                black_box("select=id,name&order=created_at.desc&limit=10")
+                black_box("select=id,name&order=created_at.desc&limit=10"),
             )
         })
     });
@@ -201,9 +191,7 @@ fn bench_query_size_scaling(c: &mut Criterion) {
                 }
                 let query = query_parts.join("&");
 
-                b.iter(|| {
-                    query_string_to_sql(black_box("table"), black_box(&query))
-                })
+                b.iter(|| query_string_to_sql(black_box("table"), black_box(&query)))
             },
         );
     }
@@ -217,18 +205,14 @@ fn bench_nesting_depth(c: &mut Criterion) {
 
     // Test logic tree nesting
     for depth in [1, 2, 3, 5].iter() {
-        group.bench_with_input(
-            BenchmarkId::new("logic_tree", depth),
-            depth,
-            |b, &depth| {
-                let mut query = String::from("field=eq.value");
-                for _ in 0..depth {
-                    query = format!("and=({},other=eq.val)", query);
-                }
+        group.bench_with_input(BenchmarkId::new("logic_tree", depth), depth, |b, &depth| {
+            let mut query = String::from("field=eq.value");
+            for _ in 0..depth {
+                query = format!("and=({},other=eq.val)", query);
+            }
 
-                b.iter(|| parse_query_string(black_box(&query)))
-            },
-        );
+            b.iter(|| parse_query_string(black_box(&query)))
+        });
     }
 
     group.finish();

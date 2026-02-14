@@ -13,8 +13,8 @@ pub use field::{Field, JsonOp};
 pub use filter::{Filter, FilterOperator, FilterValue, Quantifier};
 pub use logic::{LogicCondition, LogicOperator, LogicTree};
 pub use mutation::{
-    ConflictAction, DeleteParams, InsertParams, InsertValues, OnConflict, Operation,
-    ResolvedTable, UpdateParams,
+    ConflictAction, DeleteParams, InsertParams, InsertValues, OnConflict, Operation, ResolvedTable,
+    UpdateParams,
 };
 pub use order::{Direction, Nulls, OrderTerm};
 pub use params::ParsedParams;

@@ -529,10 +529,7 @@ mod tests {
         let conflict = OnConflict::do_update(vec!["email".to_string()]);
         let params = InsertParams::new(InsertValues::Single(map)).with_on_conflict(conflict);
         assert!(params.on_conflict.is_some());
-        assert_eq!(
-            params.on_conflict.unwrap().action,
-            ConflictAction::DoUpdate
-        );
+        assert_eq!(params.on_conflict.unwrap().action, ConflictAction::DoUpdate);
     }
 
     #[test]

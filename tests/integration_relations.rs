@@ -39,7 +39,9 @@ async fn test_many_to_one_relation() {
 
     // Verify JOIN condition is present
     assert!(result.query.contains("WHERE"));
-    assert!(result.query.contains(r#""orders"."customer_id" = "customers"."id""#));
+    assert!(result
+        .query
+        .contains(r#""orders"."customer_id" = "customers"."id""#));
 
     // Verify it's using COALESCE for null safety
     assert!(result.query.contains("COALESCE"));
@@ -67,7 +69,9 @@ async fn test_one_to_many_relation() {
     println!("Generated SQL:\n{}\n", result.query);
 
     // Verify reverse FK is used
-    assert!(result.query.contains(r#""orders"."customer_id" = "customers"."id""#));
+    assert!(result
+        .query
+        .contains(r#""orders"."customer_id" = "customers"."id""#));
 
     // Should use json_agg for array of orders
     assert!(result.query.contains("json_agg"));
@@ -84,9 +88,9 @@ async fn test_nested_relations() {
     let cache = Arc::new(cache);
 
     // Query: customers -> orders -> order_items (nested relations)
-    let params = parse_query_string(
-        "select=name,orders(id,order_items(quantity,products(name,price)))"
-    ).unwrap();
+    let params =
+        parse_query_string("select=name,orders(id,order_items(quantity,products(name,price)))")
+            .unwrap();
 
     let mut builder = QueryBuilder::new()
         .with_schema_cache(cache.clone())
@@ -192,8 +196,9 @@ async fn test_complete_workflow() {
 
     // Parse complex query
     let params = parse_query_string(
-        "select=id,name,email,orders(id,status,total_amount)&email=like.*@example.com&limit=5"
-    ).unwrap();
+        "select=id,name,email,orders(id,status,total_amount)&email=like.*@example.com&limit=5",
+    )
+    .unwrap();
 
     // Build SQL with schema cache
     let mut builder = QueryBuilder::new()
@@ -206,7 +211,9 @@ async fn test_complete_workflow() {
 
     // Verify all parts are present
     assert!(result.query.contains("SELECT"));
-    assert!(result.query.contains(r#""orders"."customer_id" = "customers"."id""#));
+    assert!(result
+        .query
+        .contains(r#""orders"."customer_id" = "customers"."id""#));
     assert!(result.query.contains("WHERE"));
     assert!(result.query.contains("LIKE"));
     assert!(result.query.contains("LIMIT"));
