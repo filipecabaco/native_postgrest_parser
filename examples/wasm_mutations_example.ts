@@ -28,7 +28,7 @@ import init, {
   parseDelete,
   parseRpc,
   parseRequest,
-} from "../pkg/postgrest_parser.js";
+} from "postgrest-parser";
 
 // Initialize WASM module
 console.log("🚀 Initializing PostgREST Parser WASM...\n");

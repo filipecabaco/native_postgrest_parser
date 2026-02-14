@@ -43,7 +43,10 @@ pub fn parse_insert_params(query_string: &str, body: &str) -> Result<InsertParam
 
     // Parse columns specification
     if let Some(columns_str) = query_params.get("columns") {
-        let columns: Vec<String> = columns_str.split(',').map(|s| s.trim().to_string()).collect();
+        let columns: Vec<String> = columns_str
+            .split(',')
+            .map(|s| s.trim().to_string())
+            .collect();
         if !columns.is_empty() && !columns.iter().any(|c| c.is_empty()) {
             params = params.with_columns(columns);
         }

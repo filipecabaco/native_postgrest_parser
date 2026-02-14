@@ -79,7 +79,7 @@ pub fn brace_list(i: &str) -> IResult<&str, Vec<String>> {
 fn list_items(i: &str) -> IResult<&str, Vec<String>> {
     let (i, items) = separated_list1(
         preceded(opt(whitespace), char(',')),
-        delimited(opt(whitespace), list_item, opt(whitespace))
+        delimited(opt(whitespace), list_item, opt(whitespace)),
     )(i)?;
     let strings: Vec<String> = items.iter().map(|s| s.to_string()).collect();
     Ok((i, strings))

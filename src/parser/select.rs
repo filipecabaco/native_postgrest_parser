@@ -290,33 +290,25 @@ fn extract_hint(text: &str) -> Result<(String, Option<crate::ast::ItemHint>), Pa
 fn parse_field_for_hint(name: &str, hint_str: &str) -> Result<crate::ast::ItemHint, ParseError> {
     match crate::parser::common::field(name) {
         Ok((_, field)) => {
-            if field.json_path.is_empty() && field.cast.is_none() {
-                Ok(crate::ast::ItemHint::Inner(hint_str.to_string()))
-            } else if field.json_path.is_empty() {
-                Ok(crate::ast::ItemHint::Cast(field.cast.unwrap().to_string()))
-            } else if field.cast.is_none() {
-                let json_path = field
+            let json_path_vec = || {
+                field
                     .json_path
                     .iter()
                     .map(|op| match op {
                         JsonOp::Arrow(s) | JsonOp::DoubleArrow(s) => s.clone(),
                         JsonOp::ArrayIndex(i) => i.to_string(),
                     })
-                    .collect();
-                Ok(crate::ast::ItemHint::JsonPath(json_path))
-            } else {
-                let json_path = field
-                    .json_path
-                    .iter()
-                    .map(|op| match op {
-                        JsonOp::Arrow(s) | JsonOp::DoubleArrow(s) => s.clone(),
-                        JsonOp::ArrayIndex(i) => i.to_string(),
-                    })
-                    .collect();
-                Ok(crate::ast::ItemHint::JsonPathCast(
-                    json_path,
-                    field.cast.unwrap().to_string(),
-                ))
+                    .collect()
+            };
+
+            match (field.json_path.is_empty(), field.cast) {
+                (true, None) => Ok(crate::ast::ItemHint::Inner(hint_str.to_string())),
+                (true, Some(cast)) => Ok(crate::ast::ItemHint::Cast(cast.to_string())),
+                (false, None) => Ok(crate::ast::ItemHint::JsonPath(json_path_vec())),
+                (false, Some(cast)) => Ok(crate::ast::ItemHint::JsonPathCast(
+                    json_path_vec(),
+                    cast.to_string(),
+                )),
             }
         }
         Err(_) => Ok(crate::ast::ItemHint::Inner(hint_str.to_string())),
@@ -481,7 +473,10 @@ mod tests {
         assert_eq!(items[1].alias, Some("author".to_string()));
         assert_eq!(items[1].item_type, ItemType::Relation);
         assert!(items[1].hint.is_some());
-        assert_eq!(items[1].hint, Some(crate::ast::ItemHint::Inner("author_id_fkey".to_string())));
+        assert_eq!(
+            items[1].hint,
+            Some(crate::ast::ItemHint::Inner("author_id_fkey".to_string()))
+        );
         let children = items[1].children.as_ref().unwrap();
         assert_eq!(children.len(), 1);
         assert_eq!(children[0].name, "name");
@@ -496,7 +491,10 @@ mod tests {
         assert_eq!(items[1].alias, None);
         assert_eq!(items[1].item_type, ItemType::Relation);
         assert!(items[1].hint.is_some());
-        assert_eq!(items[1].hint, Some(crate::ast::ItemHint::Inner("author_id_fkey".to_string())));
+        assert_eq!(
+            items[1].hint,
+            Some(crate::ast::ItemHint::Inner("author_id_fkey".to_string()))
+        );
     }
 
     #[test]
@@ -519,7 +517,8 @@ mod tests {
     #[test]
     fn test_deeply_nested_relations() {
         // select("*, posts(id, comments(id, author:profiles(name, avatar_url)))")
-        let items = parse_select("*, posts(id, comments(id, author:profiles(name, avatar_url)))").unwrap();
+        let items =
+            parse_select("*, posts(id, comments(id, author:profiles(name, avatar_url)))").unwrap();
         assert_eq!(items.len(), 2);
 
         let posts = &items[1];

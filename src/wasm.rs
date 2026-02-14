@@ -19,8 +19,8 @@
 //! console.log('Tables:', result.tables);
 //! ```
 
+use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
-use serde::{Serialize, Deserialize};
 
 #[cfg(feature = "wasm")]
 use console_error_panic_hook;
@@ -91,7 +91,10 @@ impl WasmQueryResult {
 /// console.log(result.tables);  // ["users"]
 /// ```
 #[wasm_bindgen(js_name = parseQueryString)]
-pub fn parse_query_string_wasm(table: &str, query_string: &str) -> Result<WasmQueryResult, JsValue> {
+pub fn parse_query_string_wasm(
+    table: &str,
+    query_string: &str,
+) -> Result<WasmQueryResult, JsValue> {
     let params = crate::parse_query_string(query_string)
         .map_err(|e| JsValue::from_str(&format!("Parse error: {}", e)))?;
 
@@ -452,7 +455,8 @@ mod tests {
     #[wasm_bindgen_test]
     fn test_parse_insert_wasm() {
         let body = r#"{"name":"Alice","email":"alice@example.com"}"#;
-        let result = parse_insert_wasm("users", body, Some("returning=id".to_string()), None).unwrap();
+        let result =
+            parse_insert_wasm("users", body, Some("returning=id".to_string()), None).unwrap();
         assert!(result.query.contains("INSERT"));
         assert!(result.query.contains("users"));
     }

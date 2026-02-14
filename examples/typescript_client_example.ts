@@ -6,8 +6,8 @@
  * object-based APIs, and helpful type inference.
  */
 
-import { createClient } from "../pkg/client.js";
-import type { QueryResult } from "../pkg/types.js";
+import { createClient } from "postgrest-parser/client.js";
+import type { QueryResult } from "postgrest-parser/types.js";
 
 // Create a client instance
 const client = createClient();

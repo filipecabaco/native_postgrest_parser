@@ -128,7 +128,6 @@ fn parse_order_field(field_str: &str) -> Result<Field, ParseError> {
     }
 }
 
-
 fn parse_options(option_parts: &[String]) -> Result<(Direction, Option<Nulls>), ParseError> {
     let mut direction = Direction::Asc;
     let mut nulls: Option<Nulls> = None;

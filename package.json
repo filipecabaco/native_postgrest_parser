@@ -1,16 +1,15 @@
 {
   "name": "postgrest-parser",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "PostgREST URL-to-SQL parser with WASM bindings for TypeScript/JavaScript",
   "main": "pkg/postgrest_parser.js",
   "types": "postgrest_parser.d.ts",
   "type": "module",
   "scripts": {
-    "build": "wasm-pack build --target web --out-dir pkg -- --features wasm && cd pkg && npm install && npm run build",
-    "build:wasm": "wasm-pack build --target web --out-dir pkg -- --features wasm",
-    "build:node": "wasm-pack build --target nodejs --out-dir pkg-node -- --features wasm",
-    "build:bundler": "wasm-pack build --target bundler --out-dir pkg-bundler -- --features wasm",
+    "build": "wasm-pack build --target web --out-dir pkg -- --features wasm && bash scripts/post-build.sh",
     "test:wasm": "wasm-pack test --headless --firefox -- --features wasm",
+    "test:e2e": "npm run build && cd pkg && npm pack --pack-destination ../e2e && cd ../e2e && npm install ./postgrest-parser-*.tgz && node test.mjs && rm -f postgrest-parser-*.tgz",
+    "test:e2e:npm": "cd e2e && npm install postgrest-parser@latest && node test.mjs",
     "example": "tsx example.ts"
   },
   "keywords": [

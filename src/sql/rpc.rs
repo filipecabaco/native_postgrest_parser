@@ -102,10 +102,7 @@ mod tests {
 
         let result = builder.build_rpc(&resolved, &params).unwrap();
 
-        assert_eq!(
-            result.query,
-            r#"SELECT * FROM "api"."health_check"()"#
-        );
+        assert_eq!(result.query, r#"SELECT * FROM "api"."health_check"()"#);
         assert!(result.params.is_empty());
     }
 
@@ -179,10 +176,7 @@ mod tests {
 
         let mut args = HashMap::new();
         args.insert("query".to_string(), Value::String("laptop".to_string()));
-        args.insert(
-            "min_price".to_string(),
-            Value::Number(500.into()),
-        );
+        args.insert("min_price".to_string(), Value::Number(500.into()));
 
         let filter = parse_filter("in_stock", "eq.true").unwrap();
         let params = RpcParams::new("search_products", args)

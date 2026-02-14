@@ -1,12 +1,6 @@
 use crate::ast::{Count, Missing, Plurality, PreferOptions, Resolution, ReturnRepresentation};
 use crate::error::Error;
-use nom::{
-    branch::alt,
-    bytes::complete::tag,
-    combinator::map,
-    sequence::preceded,
-    IResult,
-};
+use nom::{branch::alt, bytes::complete::tag, combinator::map, sequence::preceded, IResult};
 
 /// Parses "return=representation|minimal|headers-only"
 fn parse_return(input: &str) -> IResult<&str, ReturnRepresentation> {
@@ -112,15 +106,30 @@ mod tests {
 
     #[test]
     fn test_parse_return_representation() {
-        assert_eq!(parse_return("return=representation").unwrap().1, ReturnRepresentation::Full);
-        assert_eq!(parse_return("return=minimal").unwrap().1, ReturnRepresentation::Minimal);
-        assert_eq!(parse_return("return=headers-only").unwrap().1, ReturnRepresentation::HeadersOnly);
+        assert_eq!(
+            parse_return("return=representation").unwrap().1,
+            ReturnRepresentation::Full
+        );
+        assert_eq!(
+            parse_return("return=minimal").unwrap().1,
+            ReturnRepresentation::Minimal
+        );
+        assert_eq!(
+            parse_return("return=headers-only").unwrap().1,
+            ReturnRepresentation::HeadersOnly
+        );
     }
 
     #[test]
     fn test_parse_resolution() {
-        assert_eq!(parse_resolution("resolution=merge-duplicates").unwrap().1, Resolution::MergeDuplicates);
-        assert_eq!(parse_resolution("resolution=ignore-duplicates").unwrap().1, Resolution::IgnoreDuplicates);
+        assert_eq!(
+            parse_resolution("resolution=merge-duplicates").unwrap().1,
+            Resolution::MergeDuplicates
+        );
+        assert_eq!(
+            parse_resolution("resolution=ignore-duplicates").unwrap().1,
+            Resolution::IgnoreDuplicates
+        );
     }
 
     #[test]
@@ -132,13 +141,22 @@ mod tests {
 
     #[test]
     fn test_parse_plurality() {
-        assert_eq!(parse_plurality("plurality=singular").unwrap().1, Plurality::Singular);
-        assert_eq!(parse_plurality("plurality=multiple").unwrap().1, Plurality::Multiple);
+        assert_eq!(
+            parse_plurality("plurality=singular").unwrap().1,
+            Plurality::Singular
+        );
+        assert_eq!(
+            parse_plurality("plurality=multiple").unwrap().1,
+            Plurality::Multiple
+        );
     }
 
     #[test]
     fn test_parse_missing() {
-        assert_eq!(parse_missing("missing=default").unwrap().1, Missing::Default);
+        assert_eq!(
+            parse_missing("missing=default").unwrap().1,
+            Missing::Default
+        );
         assert_eq!(parse_missing("missing=null").unwrap().1, Missing::Null);
     }
 
@@ -160,7 +178,10 @@ mod tests {
         let input = "return=minimal, resolution=merge-duplicates, count=planned, plurality=singular, missing=default";
         let opts = parse_prefer_header(input).unwrap();
 
-        assert_eq!(opts.return_representation, Some(ReturnRepresentation::Minimal));
+        assert_eq!(
+            opts.return_representation,
+            Some(ReturnRepresentation::Minimal)
+        );
         assert_eq!(opts.resolution, Some(Resolution::MergeDuplicates));
         assert_eq!(opts.count, Some(Count::Planned));
         assert_eq!(opts.plurality, Some(Plurality::Singular));
@@ -177,7 +198,8 @@ mod tests {
     #[test]
     fn test_parse_prefer_header_unknown_option() {
         // Should skip unknown options
-        let opts = parse_prefer_header("return=representation, unknown=value, count=exact").unwrap();
+        let opts =
+            parse_prefer_header("return=representation, unknown=value, count=exact").unwrap();
         assert_eq!(opts.return_representation, Some(ReturnRepresentation::Full));
         assert_eq!(opts.count, Some(Count::Exact));
     }

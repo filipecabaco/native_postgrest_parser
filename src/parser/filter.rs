@@ -77,7 +77,6 @@ pub fn parse_field_string(field_str: &str) -> Result<Field, ParseError> {
     }
 }
 
-
 fn parse_operator_value(value_str: &str) -> Result<OperatorValueResult, ParseError> {
     let parts: Vec<&str> = value_str.split('.').collect();
 
@@ -93,19 +92,20 @@ fn parse_operator_value(value_str: &str) -> Result<OperatorValueResult, ParseErr
 
     let operator_part = rest[0];
 
-    let (operator, mut quantifier, mut language) = if operator_part.contains('(') && operator_part.ends_with(')') {
-        let open_paren = operator_part.find('(').unwrap();
-        let op = &operator_part[..open_paren];
-        let quant_or_lang = &operator_part[open_paren + 1..operator_part.len() - 1];
+    let (operator, mut quantifier, mut language) =
+        if operator_part.contains('(') && operator_part.ends_with(')') {
+            let open_paren = operator_part.find('(').unwrap();
+            let op = &operator_part[..open_paren];
+            let quant_or_lang = &operator_part[open_paren + 1..operator_part.len() - 1];
 
-        match quant_or_lang {
-            "any" => (op.to_string(), Some(Quantifier::Any), None),
-            "all" => (op.to_string(), Some(Quantifier::All), None),
-            _ => (op.to_string(), None, Some(quant_or_lang.to_string())),
-        }
-    } else {
-        (operator_part.to_string(), None, None)
-    };
+            match quant_or_lang {
+                "any" => (op.to_string(), Some(Quantifier::Any), None),
+                "all" => (op.to_string(), Some(Quantifier::All), None),
+                _ => (op.to_string(), None, Some(quant_or_lang.to_string())),
+            }
+        } else {
+            (operator_part.to_string(), None, None)
+        };
 
     if rest.len() == 1 {
         return Ok((negated, operator, quantifier, language, String::new()));

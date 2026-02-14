@@ -5,7 +5,7 @@
  * and generate PostgreSQL SQL.
  */
 
-import init, { parseQueryString, parseOnly, buildFilterClause } from './pkg/postgrest_parser.js';
+import init, { parseQueryString, parseOnly, buildFilterClause } from 'postgrest-parser';
 
 async function main() {
   // Initialize the WASM module (required once at startup)
