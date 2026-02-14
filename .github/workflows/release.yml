@@ -38,7 +38,12 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-      - run: gh release create "v${{ needs.check-version.outputs.version }}" --generate-notes
+      - run: |
+          if gh release view "v${{ needs.check-version.outputs.version }}" > /dev/null 2>&1; then
+            echo "Release v${{ needs.check-version.outputs.version }} already exists, skipping"
+          else
+            gh release create "v${{ needs.check-version.outputs.version }}" --generate-notes
+          fi
         env:
           GH_TOKEN: ${{ github.token }}
 
@@ -70,7 +75,7 @@ jobs:
           toolchain: stable
           targets: wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6 # v2.7.8
-      - uses: actions/setup-node@49933ea5288caeca8642195f882660b323136e8a # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: '20'
           registry-url: 'https://registry.npmjs.org'
