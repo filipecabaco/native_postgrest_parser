@@ -406,4 +406,138 @@ mod tests {
             Err(ParseError::UnclosedParenthesisInSelect)
         ));
     }
+
+    // Resource embedding use cases (PostgREST select syntax)
+
+    #[test]
+    fn test_many_to_one_join_via_fk() {
+        // select("*, profiles(username, avatar_url)")
+        let items = parse_select("*, profiles(username, avatar_url)").unwrap();
+        assert_eq!(items.len(), 2);
+        assert_eq!(items[0].name, "*");
+        assert_eq!(items[0].item_type, ItemType::Field);
+        assert_eq!(items[1].name, "profiles");
+        assert_eq!(items[1].item_type, ItemType::Relation);
+        let children = items[1].children.as_ref().unwrap();
+        assert_eq!(children.len(), 2);
+        assert_eq!(children[0].name, "username");
+        assert_eq!(children[1].name, "avatar_url");
+    }
+
+    #[test]
+    fn test_one_to_many_join() {
+        // select("title, comments(id, body)")
+        let items = parse_select("title, comments(id, body)").unwrap();
+        assert_eq!(items.len(), 2);
+        assert_eq!(items[0].name, "title");
+        assert_eq!(items[1].name, "comments");
+        assert_eq!(items[1].item_type, ItemType::Relation);
+        let children = items[1].children.as_ref().unwrap();
+        assert_eq!(children.len(), 2);
+        assert_eq!(children[0].name, "id");
+        assert_eq!(children[1].name, "body");
+    }
+
+    #[test]
+    fn test_aliased_relation() {
+        // select("*, author:profiles(name)") — aliased relation
+        let items = parse_select("*, author:profiles(name)").unwrap();
+        assert_eq!(items.len(), 2);
+        assert_eq!(items[1].name, "profiles");
+        assert_eq!(items[1].alias, Some("author".to_string()));
+        assert_eq!(items[1].item_type, ItemType::Relation);
+        let children = items[1].children.as_ref().unwrap();
+        assert_eq!(children.len(), 1);
+        assert_eq!(children[0].name, "name");
+    }
+
+    #[test]
+    fn test_nested_embedding_with_alias() {
+        // select("*, comments(id, author:profiles(name))") — nested embedding with alias
+        let items = parse_select("*, comments(id, author:profiles(name))").unwrap();
+        assert_eq!(items.len(), 2);
+        assert_eq!(items[1].name, "comments");
+        assert_eq!(items[1].item_type, ItemType::Relation);
+
+        let children = items[1].children.as_ref().unwrap();
+        assert_eq!(children.len(), 2);
+        assert_eq!(children[0].name, "id");
+
+        // The nested aliased relation
+        assert_eq!(children[1].name, "profiles");
+        assert_eq!(children[1].alias, Some("author".to_string()));
+        assert_eq!(children[1].item_type, ItemType::Relation);
+        let nested = children[1].children.as_ref().unwrap();
+        assert_eq!(nested.len(), 1);
+        assert_eq!(nested[0].name, "name");
+    }
+
+    #[test]
+    fn test_fk_hint_on_relation() {
+        // select("*, author:profiles!author_id_fkey(name)") — FK hint for disambiguation
+        let items = parse_select("*, author:profiles!author_id_fkey(name)").unwrap();
+        assert_eq!(items.len(), 2);
+        assert_eq!(items[1].name, "profiles");
+        assert_eq!(items[1].alias, Some("author".to_string()));
+        assert_eq!(items[1].item_type, ItemType::Relation);
+        assert!(items[1].hint.is_some());
+        assert_eq!(items[1].hint, Some(crate::ast::ItemHint::Inner("author_id_fkey".to_string())));
+        let children = items[1].children.as_ref().unwrap();
+        assert_eq!(children.len(), 1);
+        assert_eq!(children[0].name, "name");
+    }
+
+    #[test]
+    fn test_fk_hint_without_alias() {
+        // select("*, profiles!author_id_fkey(name)") — FK hint without alias
+        let items = parse_select("*, profiles!author_id_fkey(name)").unwrap();
+        assert_eq!(items.len(), 2);
+        assert_eq!(items[1].name, "profiles");
+        assert_eq!(items[1].alias, None);
+        assert_eq!(items[1].item_type, ItemType::Relation);
+        assert!(items[1].hint.is_some());
+        assert_eq!(items[1].hint, Some(crate::ast::ItemHint::Inner("author_id_fkey".to_string())));
+    }
+
+    #[test]
+    fn test_multiple_relations() {
+        // select("id, author:profiles(name), comments(id, body)")
+        let items = parse_select("id, author:profiles(name), comments(id, body)").unwrap();
+        assert_eq!(items.len(), 3);
+        assert_eq!(items[0].name, "id");
+        assert_eq!(items[0].item_type, ItemType::Field);
+
+        assert_eq!(items[1].name, "profiles");
+        assert_eq!(items[1].alias, Some("author".to_string()));
+        assert_eq!(items[1].item_type, ItemType::Relation);
+
+        assert_eq!(items[2].name, "comments");
+        assert_eq!(items[2].item_type, ItemType::Relation);
+        assert_eq!(items[2].children.as_ref().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn test_deeply_nested_relations() {
+        // select("*, posts(id, comments(id, author:profiles(name, avatar_url)))")
+        let items = parse_select("*, posts(id, comments(id, author:profiles(name, avatar_url)))").unwrap();
+        assert_eq!(items.len(), 2);
+
+        let posts = &items[1];
+        assert_eq!(posts.name, "posts");
+        let post_children = posts.children.as_ref().unwrap();
+        assert_eq!(post_children.len(), 2);
+
+        let comments = &post_children[1];
+        assert_eq!(comments.name, "comments");
+        let comment_children = comments.children.as_ref().unwrap();
+        assert_eq!(comment_children.len(), 2);
+
+        let author = &comment_children[1];
+        assert_eq!(author.name, "profiles");
+        assert_eq!(author.alias, Some("author".to_string()));
+        let author_children = author.children.as_ref().unwrap();
+        assert_eq!(author_children.len(), 2);
+        assert_eq!(author_children[0].name, "name");
+        assert_eq!(author_children[1].name, "avatar_url");
+    }
 }

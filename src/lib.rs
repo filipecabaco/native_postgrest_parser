@@ -1676,6 +1676,110 @@ mod tests {
         }
     }
 
+    // Resource Embedding Tests (PostgREST select with relations)
+
+    #[test]
+    fn test_embedding_many_to_one_via_fk() {
+        // select("*, profiles(username, avatar_url)") — many-to-one join
+        let result = query_string_to_sql("posts", "select=*,profiles(username,avatar_url)");
+        assert!(result.is_ok());
+        let query = result.unwrap();
+        assert!(query.query.contains("SELECT"));
+        assert!(query.query.contains("profiles"));
+    }
+
+    #[test]
+    fn test_embedding_one_to_many() {
+        // select("title, comments(id, body)") — one-to-many join
+        let result = query_string_to_sql("posts", "select=title,comments(id,body)");
+        assert!(result.is_ok());
+        let query = result.unwrap();
+        assert!(query.query.contains("\"title\""));
+        assert!(query.query.contains("comments"));
+    }
+
+    #[test]
+    fn test_embedding_aliased_relation() {
+        // select("*, author:profiles(name)") — aliased relation
+        let params = parse_query_string("select=*,author:profiles(name)").unwrap();
+        let select = params.select.as_ref().unwrap();
+        let relation = &select[1];
+        assert_eq!(relation.name, "profiles");
+        assert_eq!(relation.alias, Some("author".to_string()));
+        assert_eq!(relation.item_type, ItemType::Relation);
+    }
+
+    #[test]
+    fn test_embedding_nested_with_alias() {
+        // select("*, comments(id, author:profiles(name))") — nested embedding with alias
+        let params = parse_query_string("select=*,comments(id,author:profiles(name))").unwrap();
+        let select = params.select.as_ref().unwrap();
+        let comments = &select[1];
+        assert_eq!(comments.name, "comments");
+        let children = comments.children.as_ref().unwrap();
+        assert_eq!(children[1].name, "profiles");
+        assert_eq!(children[1].alias, Some("author".to_string()));
+        assert_eq!(children[1].item_type, ItemType::Relation);
+        let nested = children[1].children.as_ref().unwrap();
+        assert_eq!(nested[0].name, "name");
+    }
+
+    #[test]
+    fn test_embedding_fk_hint_disambiguation() {
+        // select("*, author:profiles!author_id_fkey(name)") — FK hint
+        let params = parse_query_string("select=*,author:profiles!author_id_fkey(name)").unwrap();
+        let select = params.select.as_ref().unwrap();
+        let relation = &select[1];
+        assert_eq!(relation.name, "profiles");
+        assert_eq!(relation.alias, Some("author".to_string()));
+        assert!(relation.hint.is_some());
+        assert_eq!(relation.hint, Some(ItemHint::Inner("author_id_fkey".to_string())));
+    }
+
+    #[test]
+    fn test_embedding_with_filters_and_ordering() {
+        // Real-world: Select with embedding + filters + ordering
+        let query_str = "select=id,title,author:profiles(name,avatar_url),comments(id,body)&status=eq.published&order=created_at.desc&limit=10";
+        let params = parse_query_string(query_str).unwrap();
+
+        assert!(params.has_select());
+        let select = params.select.as_ref().unwrap();
+        assert_eq!(select.len(), 4); // id, title, profiles (aliased as author), comments
+        assert_eq!(select[2].alias, Some("author".to_string()));
+        assert_eq!(select[3].name, "comments");
+
+        assert!(params.has_filters());
+        assert_eq!(params.order.len(), 1);
+        assert_eq!(params.limit, Some(10));
+    }
+
+    #[test]
+    fn test_embedding_supabase_blog_example() {
+        // Real Supabase use case: Blog post with author and comments
+        let query_str = "select=id,title,content,author:profiles!author_id_fkey(name,avatar_url),comments(id,body,created_at,commenter:profiles!commenter_id_fkey(name))&published=eq.true&order=created_at.desc&limit=20";
+        let params = parse_query_string(query_str).unwrap();
+
+        let select = params.select.as_ref().unwrap();
+        assert_eq!(select.len(), 5); // id, title, content, author:profiles, comments
+
+        // Author relation with FK hint
+        let author = &select[3];
+        assert_eq!(author.name, "profiles");
+        assert_eq!(author.alias, Some("author".to_string()));
+        assert_eq!(author.hint, Some(ItemHint::Inner("author_id_fkey".to_string())));
+
+        // Comments with nested commenter relation
+        let comments = &select[4];
+        assert_eq!(comments.name, "comments");
+        let comment_children = comments.children.as_ref().unwrap();
+        assert_eq!(comment_children.len(), 4); // id, body, created_at, commenter:profiles
+
+        let commenter = &comment_children[3];
+        assert_eq!(commenter.name, "profiles");
+        assert_eq!(commenter.alias, Some("commenter".to_string()));
+        assert_eq!(commenter.hint, Some(ItemHint::Inner("commenter_id_fkey".to_string())));
+    }
+
     #[test]
     fn test_100_percent_parity_demonstration() {
         // Comprehensive test demonstrating all PostgREST features
