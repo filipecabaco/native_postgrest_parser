@@ -71,6 +71,9 @@ jobs:
     if: always() && !failure() && !cancelled() && (needs.check-version.outputs.changed == 'true' || github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-22.04
     environment: release
+    permissions:
+      id-token: write
+      contents: read
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - uses: dtolnay/rust-toolchain@a54c7afa936fefeb4456b2dd8068152669aa8203 # stable
