@@ -1,6 +1,6 @@
 {
   "name": "postgrest-parser",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "PostgREST URL-to-SQL parser with WASM bindings for TypeScript/JavaScript",
   "main": "pkg/postgrest_parser.js",
   "types": "postgrest_parser.d.ts",
