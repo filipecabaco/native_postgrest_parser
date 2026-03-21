@@ -409,27 +409,9 @@ pub async fn init_schema_from_db(query_executor: js_sys::Function) -> Result<(),
         .map_err(|e| JsValue::from_str(&format!("Query executor call failed: {:?}", e)))?;
 
     // Await the promise
-    let js_future = wasm_bindgen_futures::JsFuture::from(js_sys::Promise::from(promise));
-    let result = js_future
+    wasm_bindgen_futures::JsFuture::from(js_sys::Promise::from(promise))
         .await
         .map_err(|e| JsValue::from_str(&format!("Query execution failed: {:?}", e)))?;
-
-    // Parse the result - expect { rows: [...] }
-    let result_obj = js_sys::Object::from(result);
-    let rows_value = js_sys::Reflect::get(&result_obj, &JsValue::from_str("rows"))
-        .map_err(|e| JsValue::from_str(&format!("Result missing 'rows' property: {:?}", e)))?;
-
-    // Deserialize rows to ForeignKey structs
-    let foreign_keys: Vec<crate::schema_cache::ForeignKey> =
-        serde_wasm_bindgen::from_value(rows_value)
-            .map_err(|e| JsValue::from_str(&format!("Failed to parse foreign keys: {}", e)))?;
-
-    // TODO: Build SchemaCache and store globally for use in SQL generation
-    // For now, just log success
-    web_sys::console::log_1(&JsValue::from_str(&format!(
-        "Schema loaded: {} foreign keys",
-        foreign_keys.len()
-    )));
 
     Ok(())
 }

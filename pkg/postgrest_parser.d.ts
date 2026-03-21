@@ -260,9 +260,9 @@ export interface InitOutput {
     readonly wasmqueryresult_tables: (a: number) => number;
     readonly wasmqueryresult_toJSON: (a: number) => number;
     readonly init_panic_hook: () => void;
-    readonly __wasm_bindgen_func_elem_366: (a: number, b: number) => void;
-    readonly __wasm_bindgen_func_elem_442: (a: number, b: number, c: number, d: number) => void;
-    readonly __wasm_bindgen_func_elem_367: (a: number, b: number, c: number) => void;
+    readonly __wasm_bindgen_func_elem_333: (a: number, b: number) => void;
+    readonly __wasm_bindgen_func_elem_409: (a: number, b: number, c: number, d: number) => void;
+    readonly __wasm_bindgen_func_elem_334: (a: number, b: number, c: number) => void;
     readonly __wbindgen_export: (a: number, b: number) => number;
     readonly __wbindgen_export2: (a: number, b: number, c: number, d: number) => number;
     readonly __wbindgen_export3: (a: number) => void;

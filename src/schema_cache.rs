@@ -1,8 +1,8 @@
+//! Schema introspection and caching for relation resolution.
+//!
+//! This module provides database schema introspection to resolve foreign key
+//! relationships, enabling proper JOIN generation for resource embedding.
 use serde::{Deserialize, Serialize};
-///! Schema introspection and caching for relation resolution.
-///!
-///! This module provides database schema introspection to resolve foreign key
-///! relationships, enabling proper JOIN generation for resource embedding.
 use std::collections::HashMap;
 
 #[cfg(feature = "postgres")]
