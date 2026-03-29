@@ -1986,4 +1986,202 @@ mod tests {
 
         println!("✅ 100% PostgREST Parity Achieved!");
     }
+
+    #[cfg(any(feature = "postgres", feature = "wasm"))]
+    mod operation_to_sql_with_cache_tests {
+        use super::*;
+
+        fn make_fk(
+            from_table: &str,
+            from_col: &str,
+            to_table: &str,
+            to_col: &str,
+        ) -> crate::schema_cache::ForeignKey {
+            crate::schema_cache::ForeignKey {
+                from_schema: "public".to_string(),
+                from_table: from_table.to_string(),
+                from_column: from_col.to_string(),
+                to_schema: "public".to_string(),
+                to_table: to_table.to_string(),
+                to_column: to_col.to_string(),
+                constraint_name: format!("{}_{}_fkey", from_table, from_col),
+            }
+        }
+
+        #[test]
+        fn test_with_cache_none_matches_without_cache() {
+            let op = parse("GET", "users", "id=eq.1", None, None).unwrap();
+
+            let with_cache = operation_to_sql_with_cache("users", &op, None).unwrap();
+            let without_cache = operation_to_sql("users", &op).unwrap();
+
+            assert_eq!(with_cache.query, without_cache.query);
+            assert_eq!(with_cache.params, without_cache.params);
+            assert_eq!(with_cache.tables, without_cache.tables);
+        }
+
+        #[test]
+        fn test_with_cache_select() {
+            let cache = std::sync::Arc::new(
+                crate::schema_cache::SchemaCache::from_foreign_keys(vec![]),
+            );
+            let op = parse("GET", "users", "age=gte.18&limit=5", None, None).unwrap();
+            let result =
+                operation_to_sql_with_cache("users", &op, Some(cache)).unwrap();
+
+            assert!(result.query.contains("SELECT"));
+            assert!(result.query.contains("WHERE"));
+            assert!(result.query.contains("LIMIT"));
+        }
+
+        #[test]
+        fn test_with_cache_insert() {
+            let cache = std::sync::Arc::new(
+                crate::schema_cache::SchemaCache::from_foreign_keys(vec![]),
+            );
+            let body = r#"{"name":"Alice"}"#;
+            let op = parse("POST", "users", "", Some(body), None).unwrap();
+            let result =
+                operation_to_sql_with_cache("users", &op, Some(cache)).unwrap();
+
+            assert!(result.query.contains("INSERT"));
+        }
+
+        #[test]
+        fn test_with_cache_update() {
+            let cache = std::sync::Arc::new(
+                crate::schema_cache::SchemaCache::from_foreign_keys(vec![]),
+            );
+            let body = r#"{"status":"active"}"#;
+            let op = parse("PATCH", "users", "id=eq.1", Some(body), None).unwrap();
+            let result =
+                operation_to_sql_with_cache("users", &op, Some(cache)).unwrap();
+
+            assert!(result.query.contains("UPDATE"));
+        }
+
+        #[test]
+        fn test_with_cache_delete() {
+            let cache = std::sync::Arc::new(
+                crate::schema_cache::SchemaCache::from_foreign_keys(vec![]),
+            );
+            let op = parse("DELETE", "users", "id=eq.1", None, None).unwrap();
+            let result =
+                operation_to_sql_with_cache("users", &op, Some(cache)).unwrap();
+
+            assert!(result.query.contains("DELETE"));
+        }
+
+        #[test]
+        fn test_with_cache_rpc() {
+            let cache = std::sync::Arc::new(
+                crate::schema_cache::SchemaCache::from_foreign_keys(vec![]),
+            );
+            let body = r#"{"user_id": 1}"#;
+            let op =
+                parse("POST", "rpc/get_profile", "", Some(body), None).unwrap();
+            let result = operation_to_sql_with_cache(
+                "rpc/get_profile",
+                &op,
+                Some(cache),
+            )
+            .unwrap();
+
+            assert!(result.query.contains("get_profile"));
+        }
+
+        #[test]
+        fn test_with_cache_empty_table_errors() {
+            let op = parse("GET", "users", "id=eq.1", None, None).unwrap();
+            let result = operation_to_sql_with_cache("", &op, None);
+            assert!(result.is_err());
+        }
+
+        #[test]
+        fn test_with_cache_resolves_many_to_one_relation() {
+            let fks = vec![make_fk("orders", "customer_id", "customers", "id")];
+            let cache = std::sync::Arc::new(
+                crate::schema_cache::SchemaCache::from_foreign_keys(fks),
+            );
+
+            // select=id,customers(name) on orders table — Many-to-One embed
+            let op = parse(
+                "GET",
+                "orders",
+                "select=id,customers(name)",
+                None,
+                None,
+            )
+            .unwrap();
+            let result =
+                operation_to_sql_with_cache("orders", &op, Some(cache)).unwrap();
+
+            // Should produce a correlated subquery for the M2O relation
+            assert!(result.query.contains("customers"));
+            assert!(result.query.contains("customer_id"));
+        }
+
+        #[test]
+        fn test_with_cache_resolves_one_to_many_relation() {
+            let fks = vec![make_fk("orders", "customer_id", "customers", "id")];
+            let cache = std::sync::Arc::new(
+                crate::schema_cache::SchemaCache::from_foreign_keys(fks),
+            );
+
+            // select=id,orders(id,total) on customers table — One-to-Many embed
+            let op = parse(
+                "GET",
+                "customers",
+                "select=id,orders(id)",
+                None,
+                None,
+            )
+            .unwrap();
+            let result =
+                operation_to_sql_with_cache("customers", &op, Some(cache))
+                    .unwrap();
+
+            // Should produce a json_agg subquery for the O2M relation
+            assert!(result.query.contains("orders"));
+            assert!(result.query.contains("json_agg"));
+        }
+
+        #[test]
+        fn test_with_cache_relation_not_found_errors() {
+            let cache = std::sync::Arc::new(
+                crate::schema_cache::SchemaCache::from_foreign_keys(vec![]),
+            );
+
+            // Try to embed a relation that doesn't exist in the cache
+            let op = parse(
+                "GET",
+                "orders",
+                "select=id,nonexistent(name)",
+                None,
+                None,
+            )
+            .unwrap();
+            let result =
+                operation_to_sql_with_cache("orders", &op, Some(cache));
+
+            assert!(result.is_err());
+        }
+
+        #[test]
+        fn test_without_cache_relation_uses_placeholder() {
+            // Without a cache, relations produce placeholder SQL
+            let op = parse(
+                "GET",
+                "orders",
+                "select=id,customers(name)",
+                None,
+                None,
+            )
+            .unwrap();
+            let result = operation_to_sql_with_cache("orders", &op, None).unwrap();
+
+            // Should still produce SQL (placeholder mode), not error
+            assert!(result.query.contains("SELECT"));
+        }
+    }
 }

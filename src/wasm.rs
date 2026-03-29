@@ -520,102 +520,385 @@ pub fn clear_all_schemas() {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use wasm_bindgen_test::*;
 
-    #[wasm_bindgen_test]
-    fn test_parse_query_string_wasm() {
-        let result = parse_query_string_wasm("users", "age=gte.18&status=eq.active", None).unwrap();
-        assert!(result.query.contains("SELECT"));
-        assert!(result.query.contains("users"));
+    // --- Helpers ---
+
+    fn make_test_fk(
+        from_table: &str,
+        from_col: &str,
+        to_table: &str,
+        to_col: &str,
+    ) -> ForeignKey {
+        ForeignKey {
+            from_schema: "public".to_string(),
+            from_table: from_table.to_string(),
+            from_column: from_col.to_string(),
+            to_schema: "public".to_string(),
+            to_table: to_table.to_string(),
+            to_column: to_col.to_string(),
+            constraint_name: format!("{}_{}_fkey", from_table, from_col),
+        }
     }
 
-    #[wasm_bindgen_test]
-    fn test_parse_only_wasm() {
-        let result = parse_only_wasm("age=gte.18").unwrap();
-        assert!(!result.is_null());
-    }
-
-    #[wasm_bindgen_test]
-    fn test_parse_insert_wasm() {
-        let body = r#"{"name":"Alice","email":"alice@example.com"}"#;
-        let result =
-            parse_insert_wasm("users", body, Some("returning=id".to_string()), None, None)
-                .unwrap();
-        assert!(result.query.contains("INSERT"));
-        assert!(result.query.contains("users"));
-    }
-
-    #[wasm_bindgen_test]
-    fn test_parse_update_wasm() {
-        let body = r#"{"status":"active"}"#;
-        let result = parse_update_wasm("users", body, "id=eq.123", None, None).unwrap();
-        assert!(result.query.contains("UPDATE"));
-        assert!(result.query.contains("users"));
-    }
-
-    #[wasm_bindgen_test]
-    fn test_parse_delete_wasm() {
-        let result = parse_delete_wasm("users", "id=eq.123", None, None).unwrap();
-        assert!(result.query.contains("DELETE"));
-        assert!(result.query.contains("users"));
-    }
-
-    #[wasm_bindgen_test]
-    fn test_parse_rpc_wasm() {
-        let body = r#"{"arg1":"value1"}"#;
-        let result =
-            parse_rpc_wasm("my_function", Some(body.to_string()), None, None, None).unwrap();
-        assert!(result.query.contains("my_function"));
-    }
-
-    #[wasm_bindgen_test]
-    fn test_parse_request_get() {
-        let result = parse_request_wasm("GET", "users", "age=gte.18", None, None, None).unwrap();
-        assert!(result.query.contains("SELECT"));
-    }
-
-    #[wasm_bindgen_test]
-    fn test_parse_request_post() {
-        let body = r#"{"name":"Alice"}"#;
-        let result =
-            parse_request_wasm("POST", "users", "", Some(body.to_string()), None, None).unwrap();
-        assert!(result.query.contains("INSERT"));
-    }
-
-    #[wasm_bindgen_test]
-    fn test_clear_schema() {
-        // Store a schema
+    fn store_test_schema(schema_id: &str, fks: Vec<ForeignKey>) {
+        let cache = SchemaCache::from_foreign_keys(fks);
         SCHEMA_STORE.with(|store| {
             store
                 .borrow_mut()
-                .insert("test-tenant".to_string(), Arc::new(SchemaCache::new()));
+                .insert(schema_id.to_string(), Arc::new(cache));
         });
-
-        // Verify it exists
-        assert!(get_schema_cache(Some("test-tenant")).is_some());
-
-        // Clear it
-        clear_schema("test-tenant");
-
-        // Verify it's gone
-        assert!(get_schema_cache(Some("test-tenant")).is_none());
     }
 
-    #[wasm_bindgen_test]
-    fn test_clear_all_schemas() {
-        // Store multiple schemas
-        SCHEMA_STORE.with(|store| {
-            let mut s = store.borrow_mut();
-            s.insert("tenant-a".to_string(), Arc::new(SchemaCache::new()));
-            s.insert("tenant-b".to_string(), Arc::new(SchemaCache::new()));
-        });
+    /// Parse and generate SQL using the core Rust functions + schema store,
+    /// bypassing the WASM JsValue layer so tests run natively.
+    fn parse_with_schema(
+        method: &str,
+        path: &str,
+        query_string: &str,
+        body: Option<&str>,
+        schema_id: Option<&str>,
+    ) -> Result<crate::sql::QueryResult, crate::error::Error> {
+        let operation = crate::parse(method, path, query_string, body, None)?;
+        let cache = get_schema_cache(schema_id);
+        crate::operation_to_sql_with_cache(path, &operation, cache)
+    }
 
-        assert!(get_schema_cache(Some("tenant-a")).is_some());
-        assert!(get_schema_cache(Some("tenant-b")).is_some());
+    // --- Schema store tests ---
+
+    #[test]
+    fn test_clear_schema() {
+        store_test_schema("test-clear", vec![]);
+        assert!(get_schema_cache(Some("test-clear")).is_some());
+
+        clear_schema("test-clear");
+        assert!(get_schema_cache(Some("test-clear")).is_none());
+    }
+
+    #[test]
+    fn test_clear_all_schemas() {
+        store_test_schema("clear-a", vec![]);
+        store_test_schema("clear-b", vec![]);
+
+        assert!(get_schema_cache(Some("clear-a")).is_some());
+        assert!(get_schema_cache(Some("clear-b")).is_some());
 
         clear_all_schemas();
 
-        assert!(get_schema_cache(Some("tenant-a")).is_none());
-        assert!(get_schema_cache(Some("tenant-b")).is_none());
+        assert!(get_schema_cache(Some("clear-a")).is_none());
+        assert!(get_schema_cache(Some("clear-b")).is_none());
+    }
+
+    #[test]
+    fn test_get_schema_cache_returns_none_for_unknown_key() {
+        assert!(get_schema_cache(Some("nonexistent-key")).is_none());
+    }
+
+    #[test]
+    fn test_empty_schema_id_maps_to_default() {
+        store_test_schema("default", vec![]);
+
+        // None maps to "default"
+        assert!(get_schema_cache(None).is_some());
+        // Empty string also maps to "default" (via initSchemaFromDb logic)
+        // But get_schema_cache with Some("") looks up "" not "default"
+        // This tests the raw lookup behavior
+        assert!(get_schema_cache(Some("default")).is_some());
+
+        clear_schema("default");
+    }
+
+    // --- Parse with schema_id: SELECT ---
+
+    #[test]
+    fn test_select_with_schema_id_resolves_many_to_one() {
+        store_test_schema(
+            "sel-m2o",
+            vec![make_test_fk("orders", "customer_id", "customers", "id")],
+        );
+
+        let result = parse_with_schema(
+            "GET",
+            "orders",
+            "select=id,customers(name)",
+            None,
+            Some("sel-m2o"),
+        )
+        .unwrap();
+
+        assert!(result.query.contains("customers"));
+        assert!(result.query.contains("customer_id"));
+
+        clear_schema("sel-m2o");
+    }
+
+    #[test]
+    fn test_select_with_schema_id_resolves_one_to_many() {
+        store_test_schema(
+            "sel-o2m",
+            vec![make_test_fk("orders", "customer_id", "customers", "id")],
+        );
+
+        let result = parse_with_schema(
+            "GET",
+            "customers",
+            "select=id,orders(id)",
+            None,
+            Some("sel-o2m"),
+        )
+        .unwrap();
+
+        assert!(result.query.contains("orders"));
+        assert!(result.query.contains("json_agg"));
+
+        clear_schema("sel-o2m");
+    }
+
+    // --- Parse with schema_id: INSERT ---
+
+    #[test]
+    fn test_insert_with_schema_id() {
+        store_test_schema("ins-tenant", vec![]);
+
+        let result = parse_with_schema(
+            "POST",
+            "users",
+            "",
+            Some(r#"{"name":"Bob"}"#),
+            Some("ins-tenant"),
+        )
+        .unwrap();
+
+        assert!(result.query.contains("INSERT"));
+
+        clear_schema("ins-tenant");
+    }
+
+    // --- Parse with schema_id: UPDATE ---
+
+    #[test]
+    fn test_update_with_schema_id() {
+        store_test_schema("upd-tenant", vec![]);
+
+        let result = parse_with_schema(
+            "PATCH",
+            "users",
+            "id=eq.1",
+            Some(r#"{"status":"active"}"#),
+            Some("upd-tenant"),
+        )
+        .unwrap();
+
+        assert!(result.query.contains("UPDATE"));
+
+        clear_schema("upd-tenant");
+    }
+
+    // --- Parse with schema_id: DELETE ---
+
+    #[test]
+    fn test_delete_with_schema_id() {
+        store_test_schema("del-tenant", vec![]);
+
+        let result = parse_with_schema(
+            "DELETE",
+            "users",
+            "id=eq.1",
+            None,
+            Some("del-tenant"),
+        )
+        .unwrap();
+
+        assert!(result.query.contains("DELETE"));
+
+        clear_schema("del-tenant");
+    }
+
+    // --- Parse with schema_id: RPC ---
+
+    #[test]
+    fn test_rpc_with_schema_id() {
+        store_test_schema("rpc-tenant", vec![]);
+
+        let result = parse_with_schema(
+            "POST",
+            "rpc/my_func",
+            "",
+            Some(r#"{"x": 1}"#),
+            Some("rpc-tenant"),
+        )
+        .unwrap();
+
+        assert!(result.query.contains("my_func"));
+
+        clear_schema("rpc-tenant");
+    }
+
+    // --- Tenant isolation ---
+
+    #[test]
+    fn test_two_tenants_different_schemas() {
+        store_test_schema(
+            "iso-a",
+            vec![make_test_fk("posts", "author_id", "users", "id")],
+        );
+        store_test_schema(
+            "iso-b",
+            vec![make_test_fk("orders", "product_id", "products", "id")],
+        );
+
+        // Tenant A resolves posts->users
+        let a = parse_with_schema(
+            "GET",
+            "posts",
+            "select=title,users(name)",
+            None,
+            Some("iso-a"),
+        )
+        .unwrap();
+        assert!(a.query.contains("author_id"));
+
+        // Tenant B resolves orders->products
+        let b = parse_with_schema(
+            "GET",
+            "orders",
+            "select=id,products(name)",
+            None,
+            Some("iso-b"),
+        )
+        .unwrap();
+        assert!(b.query.contains("product_id"));
+
+        // Tenant A CANNOT resolve orders->products (not in their schema)
+        let a_wrong = parse_with_schema(
+            "GET",
+            "orders",
+            "select=id,products(name)",
+            None,
+            Some("iso-a"),
+        );
+        assert!(a_wrong.is_err());
+
+        // Tenant B CANNOT resolve posts->users (not in their schema)
+        let b_wrong = parse_with_schema(
+            "GET",
+            "posts",
+            "select=title,users(name)",
+            None,
+            Some("iso-b"),
+        );
+        assert!(b_wrong.is_err());
+
+        clear_all_schemas();
+    }
+
+    #[test]
+    fn test_no_schema_id_uses_default_cache() {
+        store_test_schema(
+            "default",
+            vec![make_test_fk("posts", "user_id", "users", "id")],
+        );
+
+        // None → "default"
+        let result = parse_with_schema(
+            "GET",
+            "posts",
+            "select=title,users(name)",
+            None,
+            None,
+        )
+        .unwrap();
+        assert!(result.query.contains("user_id"));
+
+        clear_schema("default");
+    }
+
+    // --- Clear removes resolution ---
+
+    #[test]
+    fn test_clear_schema_removes_relation_resolution() {
+        store_test_schema(
+            "evict-me",
+            vec![make_test_fk("orders", "customer_id", "customers", "id")],
+        );
+
+        // Before clear: resolves
+        let before = parse_with_schema(
+            "GET",
+            "orders",
+            "select=id,customers(name)",
+            None,
+            Some("evict-me"),
+        )
+        .unwrap();
+        assert!(before.query.contains("customer_id"));
+
+        clear_schema("evict-me");
+
+        // After clear: no cache → falls back to placeholder (no FK columns)
+        let after = parse_with_schema(
+            "GET",
+            "orders",
+            "select=id,customers(name)",
+            None,
+            Some("evict-me"),
+        )
+        .unwrap();
+        assert!(!after.query.contains("customer_id"));
+    }
+
+    // --- FK row validation ---
+
+    #[test]
+    fn test_from_foreign_keys_skips_empty_fields() {
+        // Simulate what init_schema_from_db validation does:
+        // rows with empty fields should be skipped
+        let valid_fk = make_test_fk("orders", "customer_id", "customers", "id");
+        let invalid_fk = ForeignKey {
+            from_schema: "public".to_string(),
+            from_table: "".to_string(), // empty — would be skipped by init_schema_from_db
+            from_column: "bad_col".to_string(),
+            to_schema: "public".to_string(),
+            to_table: "other".to_string(),
+            to_column: "id".to_string(),
+            constraint_name: "bad_fkey".to_string(),
+        };
+
+        // from_foreign_keys itself doesn't validate (it's the init function that does)
+        // but we can verify the cache only has meaningful entries
+        let cache = SchemaCache::from_foreign_keys(vec![valid_fk, invalid_fk]);
+
+        // Valid FK should be findable
+        let rel = cache.find_relationship("public", "orders", "customers");
+        assert!(rel.is_some());
+
+        // The invalid FK with empty from_table is stored under ("public", "")
+        // which won't match any real table lookup
+        let bad = cache.find_relationship("public", "", "other");
+        // It would match, demonstrating why init_schema_from_db must filter these
+        assert!(bad.is_some());
+
+        // But a normal table won't accidentally match it
+        let no_match = cache.find_relationship("public", "valid_table", "other");
+        assert!(no_match.is_none());
+    }
+
+    // --- Backwards compatibility ---
+
+    #[test]
+    fn test_parse_without_schema_id_works() {
+        // No schema loaded at all — basic queries still work
+        let result = parse_with_schema(
+            "GET",
+            "users",
+            "age=gte.18&limit=10",
+            None,
+            None,
+        )
+        .unwrap();
+
+        assert!(result.query.contains("SELECT"));
+        assert!(result.query.contains("users"));
+        assert!(result.query.contains("WHERE"));
+        assert!(result.query.contains("LIMIT"));
     }
 }

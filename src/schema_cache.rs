@@ -264,4 +264,103 @@ mod tests {
         let cache = SchemaCache::new();
         assert_eq!(cache.get_foreign_keys("public", "users").len(), 0);
     }
+
+    fn make_test_fk(from_table: &str, from_col: &str, to_table: &str, to_col: &str) -> ForeignKey {
+        ForeignKey {
+            from_schema: "public".to_string(),
+            from_table: from_table.to_string(),
+            from_column: from_col.to_string(),
+            to_schema: "public".to_string(),
+            to_table: to_table.to_string(),
+            to_column: to_col.to_string(),
+            constraint_name: format!("{}_{}_fkey", from_table, from_col),
+        }
+    }
+
+    #[test]
+    fn test_from_foreign_keys_indexes_forward_and_reverse() {
+        let fks = vec![
+            make_test_fk("orders", "customer_id", "customers", "id"),
+            make_test_fk("order_items", "order_id", "orders", "id"),
+        ];
+
+        let cache = SchemaCache::from_foreign_keys(fks);
+
+        // Forward: orders has FK to customers
+        let order_fks = cache.get_foreign_keys("public", "orders");
+        assert_eq!(order_fks.len(), 1);
+        assert_eq!(order_fks[0].to_table, "customers");
+
+        // Forward: order_items has FK to orders
+        let item_fks = cache.get_foreign_keys("public", "order_items");
+        assert_eq!(item_fks.len(), 1);
+        assert_eq!(item_fks[0].to_table, "orders");
+
+        // Reverse: customers is referenced by orders
+        let cust_refs = cache.get_referencing_tables("public", "customers");
+        assert_eq!(cust_refs.len(), 1);
+        assert_eq!(cust_refs[0].from_table, "orders");
+
+        // Reverse: orders is referenced by order_items
+        let order_refs = cache.get_referencing_tables("public", "orders");
+        assert_eq!(order_refs.len(), 1);
+        assert_eq!(order_refs[0].from_table, "order_items");
+    }
+
+    #[test]
+    fn test_from_foreign_keys_empty() {
+        let cache = SchemaCache::from_foreign_keys(vec![]);
+        assert_eq!(cache.get_foreign_keys("public", "anything").len(), 0);
+        assert_eq!(cache.get_referencing_tables("public", "anything").len(), 0);
+    }
+
+    #[test]
+    fn test_from_foreign_keys_multiple_fks_same_table() {
+        let fks = vec![
+            make_test_fk("transfers", "from_account_id", "accounts", "id"),
+            make_test_fk("transfers", "to_account_id", "accounts", "id"),
+        ];
+
+        let cache = SchemaCache::from_foreign_keys(fks);
+
+        let transfer_fks = cache.get_foreign_keys("public", "transfers");
+        assert_eq!(transfer_fks.len(), 2);
+
+        let account_refs = cache.get_referencing_tables("public", "accounts");
+        assert_eq!(account_refs.len(), 2);
+    }
+
+    #[test]
+    fn test_find_relationship_many_to_one() {
+        let fks = vec![make_test_fk("orders", "customer_id", "customers", "id")];
+        let cache = SchemaCache::from_foreign_keys(fks);
+
+        // orders -> customers is Many-to-One
+        let rel = cache.find_relationship("public", "orders", "customers");
+        assert!(rel.is_some());
+        let rel = rel.unwrap();
+        assert_eq!(rel.relation_type, RelationType::ManyToOne);
+        assert_eq!(rel.foreign_key.from_column, "customer_id");
+    }
+
+    #[test]
+    fn test_find_relationship_one_to_many() {
+        let fks = vec![make_test_fk("orders", "customer_id", "customers", "id")];
+        let cache = SchemaCache::from_foreign_keys(fks);
+
+        // customers -> orders is One-to-Many (reverse direction)
+        let rel = cache.find_relationship("public", "customers", "orders");
+        assert!(rel.is_some());
+        let rel = rel.unwrap();
+        assert_eq!(rel.relation_type, RelationType::OneToMany);
+    }
+
+    #[test]
+    fn test_find_relationship_not_found() {
+        let fks = vec![make_test_fk("orders", "customer_id", "customers", "id")];
+        let cache = SchemaCache::from_foreign_keys(fks);
+
+        // No relationship between customers and products
+        assert!(cache.find_relationship("public", "customers", "products").is_none());
+    }
 }
