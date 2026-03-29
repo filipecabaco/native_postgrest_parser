@@ -84,6 +84,25 @@ impl SchemaCache {
         Self::default()
     }
 
+    /// Creates a schema cache from a list of foreign keys
+    pub fn from_foreign_keys(fks: Vec<ForeignKey>) -> Self {
+        let mut cache = Self::new();
+        for fk in fks {
+            cache
+                .foreign_keys
+                .entry((fk.from_schema.clone(), fk.from_table.clone()))
+                .or_default()
+                .push(fk.clone());
+
+            cache
+                .reverse_fks
+                .entry((fk.to_schema.clone(), fk.to_table.clone()))
+                .or_default()
+                .push(fk);
+        }
+        cache
+    }
+
     #[cfg(feature = "postgres")]
     /// Loads schema information from a PostgreSQL database
     pub async fn load_from_database(pool: &PgPool) -> Result<Self, sqlx::Error> {

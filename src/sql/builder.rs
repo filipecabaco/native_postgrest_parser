@@ -70,7 +70,7 @@ pub struct QueryBuilder {
     /// Tables referenced in the query
     pub tables: Vec<String>,
     /// Optional schema cache for relation resolution
-    #[cfg(feature = "postgres")]
+    #[cfg(any(feature = "postgres", feature = "wasm"))]
     pub schema_cache: Option<std::sync::Arc<crate::schema_cache::SchemaCache>>,
     /// Current schema being queried (for relation resolution)
     pub current_schema: String,
@@ -90,14 +90,14 @@ impl QueryBuilder {
             params: Vec::new(),
             param_index: 0,
             tables: Vec::new(),
-            #[cfg(feature = "postgres")]
+            #[cfg(any(feature = "postgres", feature = "wasm"))]
             schema_cache: None,
             current_schema: "public".to_string(),
         }
     }
 
     /// Sets the schema cache for relation resolution
-    #[cfg(feature = "postgres")]
+    #[cfg(any(feature = "postgres", feature = "wasm"))]
     pub fn with_schema_cache(
         mut self,
         cache: std::sync::Arc<crate::schema_cache::SchemaCache>,
@@ -194,10 +194,10 @@ impl QueryBuilder {
     }
 
     fn build_relation_sql(&self, item: &SelectItem) -> Result<String, SqlError> {
-        #[cfg(feature = "postgres")]
+        #[cfg(any(feature = "postgres", feature = "wasm"))]
         let rel_table = &item.name;
 
-        #[cfg(feature = "postgres")]
+        #[cfg(any(feature = "postgres", feature = "wasm"))]
         {
             // With schema cache: generate proper JOINs
             if let Some(cache) = &self.schema_cache {
@@ -224,7 +224,7 @@ impl QueryBuilder {
         self.build_relation_placeholder(item)
     }
 
-    #[cfg(feature = "postgres")]
+    #[cfg(any(feature = "postgres", feature = "wasm"))]
     fn build_relation_with_fk(
         &self,
         item: &SelectItem,

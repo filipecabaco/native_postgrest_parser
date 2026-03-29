@@ -579,6 +579,65 @@ pub fn operation_to_sql(table: &str, operation: &Operation) -> Result<QueryResul
     }
 }
 
+/// Converts an Operation to SQL with an optional schema cache for relation resolution.
+///
+/// This variant allows passing a `SchemaCache` for resolving foreign key
+/// relationships in embedded resource queries (e.g., `select=*,posts(*)`)
+/// without requiring the `postgres` feature for database connectivity.
+#[cfg(any(feature = "postgres", feature = "wasm"))]
+pub fn operation_to_sql_with_cache(
+    table: &str,
+    operation: &Operation,
+    schema_cache: Option<std::sync::Arc<schema_cache::SchemaCache>>,
+) -> Result<QueryResult, Error> {
+    let make_builder = || -> QueryBuilder {
+        let mut builder = QueryBuilder::new();
+        if let Some(cache) = &schema_cache {
+            builder = builder.with_schema_cache(cache.clone());
+        }
+        builder
+    };
+
+    match operation {
+        Operation::Select(params, _prefer) => {
+            if table.is_empty() {
+                return Err(Error::Sql(SqlError::EmptyTableName));
+            }
+            let mut builder = make_builder();
+            builder.build_select(table, params).map_err(Error::Sql)
+        }
+        Operation::Insert(params, _prefer) => {
+            let resolved_table = resolve_schema(table, "POST", None)?;
+            let mut builder = make_builder();
+            builder
+                .build_insert(&resolved_table, params)
+                .map_err(Error::Sql)
+        }
+        Operation::Update(params, _prefer) => {
+            let resolved_table = resolve_schema(table, "PATCH", None)?;
+            let mut builder = make_builder();
+            builder
+                .build_update(&resolved_table, params)
+                .map_err(Error::Sql)
+        }
+        Operation::Delete(params, _prefer) => {
+            let resolved_table = resolve_schema(table, "DELETE", None)?;
+            let mut builder = make_builder();
+            builder
+                .build_delete(&resolved_table, params)
+                .map_err(Error::Sql)
+        }
+        Operation::Rpc(params, _prefer) => {
+            let function_name = table.strip_prefix("rpc/").unwrap_or(table);
+            let resolved_table = resolve_schema(function_name, "POST", None)?;
+            let mut builder = make_builder();
+            builder
+                .build_rpc(&resolved_table, params)
+                .map_err(Error::Sql)
+        }
+    }
+}
+
 /// Extracts column names from query string filters for use as ON CONFLICT target
 ///
 /// Used by PUT requests to automatically determine conflict columns
