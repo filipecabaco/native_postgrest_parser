@@ -2,6 +2,19 @@
 //!
 //! This module provides a TypeScript-friendly interface to the PostgREST parser.
 //!
+//! ## Trust Model
+//!
+//! - **Schema IDs** are opaque keys into an in-process cache. Callers are
+//!   responsible for ensuring that schema IDs are not attacker-controlled.
+//!   If a caller passes the wrong schema ID, the parser will silently use
+//!   that schema's foreign key relationships — there is no authorization check.
+//!
+//! - **`query_executor`** callbacks passed to [`init_schema_from_db`] are fully
+//!   trusted. The callback receives a hardcoded SQL introspection query and the
+//!   result is used to populate the FK cache. A malicious callback could inject
+//!   fabricated FK data, causing the parser to generate JOINs to arbitrary tables.
+//!   Only pass query executors that run against the correct tenant database.
+//!
 //! ## Usage from TypeScript
 //!
 //! ```typescript
@@ -20,8 +33,9 @@
 //! ```
 
 use serde::{Deserialize, Serialize};
+use std::cell::RefCell;
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use wasm_bindgen::prelude::*;
 
 use crate::schema_cache::{ForeignKey, SchemaCache};
@@ -29,19 +43,24 @@ use crate::schema_cache::{ForeignKey, SchemaCache};
 #[cfg(feature = "wasm")]
 use console_error_panic_hook;
 
-/// Global schema cache store, keyed by schema_id.
-/// Each tenant/schema gets its own SchemaCache entry.
-static SCHEMA_STORE: std::sync::LazyLock<Mutex<HashMap<String, Arc<SchemaCache>>>> =
-    std::sync::LazyLock::new(|| Mutex::new(HashMap::new()));
+// Per-thread schema cache store, keyed by schema_id.
+// Each tenant/schema gets its own SchemaCache entry.
+//
+// Uses `thread_local! + RefCell` instead of `Mutex` because WASM is
+// single-threaded — avoids unnecessary atomic synchronization overhead
+// on every parse call.
+thread_local! {
+    static SCHEMA_STORE: RefCell<HashMap<String, Arc<SchemaCache>>> =
+        RefCell::new(HashMap::new());
+}
 
 /// Default schema key used when no schema_id is provided
 const DEFAULT_SCHEMA_KEY: &str = "default";
 
-/// Look up a schema cache by schema_id, returning None if not found or empty key.
+/// Look up a schema cache by schema_id, returning None if not found.
 fn get_schema_cache(schema_id: Option<&str>) -> Option<Arc<SchemaCache>> {
     let key = schema_id.unwrap_or(DEFAULT_SCHEMA_KEY);
-    let store = SCHEMA_STORE.lock().ok()?;
-    store.get(key).cloned()
+    SCHEMA_STORE.with(|store| store.borrow().get(key).cloned())
 }
 
 /// Initialize WASM module (call this first from JavaScript)
@@ -107,26 +126,8 @@ pub fn parse_query_string_wasm(
     query_string: &str,
     schema_id: Option<String>,
 ) -> Result<WasmQueryResult, JsValue> {
-    let params = crate::parse_query_string(query_string)
-        .map_err(|e| JsValue::from_str(&format!("Parse error: {}", e)))?;
-
-    let cache = get_schema_cache(schema_id.as_deref());
-    let result = if cache.is_some() {
-        let mut builder = crate::QueryBuilder::new();
-        builder = builder.with_schema_cache(cache.unwrap());
-        builder
-            .build_select(table, &params)
-            .map_err(|e| JsValue::from_str(&format!("SQL generation error: {}", e)))?
-    } else {
-        crate::to_sql(table, &params)
-            .map_err(|e| JsValue::from_str(&format!("SQL generation error: {}", e)))?
-    };
-
-    Ok(WasmQueryResult {
-        query: result.query,
-        params: result.params,
-        tables: result.tables,
-    })
+    // Delegate to parseRequest for consistent schema cache handling
+    parse_request_wasm("GET", table, query_string, None, None, schema_id)
 }
 
 /// Parse only the query string without generating SQL.
@@ -282,7 +283,9 @@ pub fn parse_rpc_wasm(
 /// * `query_string` - URL query string
 /// * `body` - Request body as JSON string (or null)
 /// * `headers` - Optional headers as JSON object (for Prefer header)
-/// * `schema_id` - Optional schema cache key for per-tenant schema resolution
+/// * `schema_id` - Optional schema cache key for per-tenant schema resolution.
+///   Must match a key previously passed to [`init_schema_from_db`]. If not
+///   provided, falls back to the "default" cache entry (if one exists).
 #[wasm_bindgen(js_name = parseRequest)]
 pub fn parse_request_wasm(
     method: &str,
@@ -325,10 +328,18 @@ pub fn parse_request_wasm(
 /// and returns results. The schema introspection queries will be executed via
 /// this callback to populate the relationship cache.
 ///
+/// # Trust
+///
+/// The `query_executor` is **fully trusted**. It receives a hardcoded SQL
+/// introspection query and its result is used verbatim to build the FK cache.
+/// Only pass executors that connect to the correct tenant database.
+///
 /// # Arguments
 ///
 /// * `schema_id` - A unique key to store this schema under (e.g., tenant ID).
-///   If empty or not provided, uses "default".
+///   If empty, uses "default". Callers must ensure schema IDs are not
+///   attacker-controlled — passing another tenant's ID would overwrite their
+///   cached schema.
 /// * `query_executor` - An async JavaScript function with signature:
 ///   `async (sql: string) => { rows: any[] }`
 ///
@@ -401,62 +412,66 @@ pub async fn init_schema_from_db(
 
     let rows_array = js_sys::Array::from(&rows);
     let mut foreign_keys = Vec::new();
+    let required_fields = [
+        "constraint_name",
+        "from_schema",
+        "from_table",
+        "from_column",
+        "to_schema",
+        "to_table",
+        "to_column",
+    ];
 
     for i in 0..rows_array.length() {
         let row = rows_array.get(i);
 
-        let constraint_name = js_sys::Reflect::get(&row, &JsValue::from_str("constraint_name"))
-            .ok()
-            .and_then(|v| v.as_string())
-            .unwrap_or_default();
-        let from_schema = js_sys::Reflect::get(&row, &JsValue::from_str("from_schema"))
-            .ok()
-            .and_then(|v| v.as_string())
-            .unwrap_or_default();
-        let from_table = js_sys::Reflect::get(&row, &JsValue::from_str("from_table"))
-            .ok()
-            .and_then(|v| v.as_string())
-            .unwrap_or_default();
-        let from_column = js_sys::Reflect::get(&row, &JsValue::from_str("from_column"))
-            .ok()
-            .and_then(|v| v.as_string())
-            .unwrap_or_default();
-        let to_schema = js_sys::Reflect::get(&row, &JsValue::from_str("to_schema"))
-            .ok()
-            .and_then(|v| v.as_string())
-            .unwrap_or_default();
-        let to_table = js_sys::Reflect::get(&row, &JsValue::from_str("to_table"))
-            .ok()
-            .and_then(|v| v.as_string())
-            .unwrap_or_default();
-        let to_column = js_sys::Reflect::get(&row, &JsValue::from_str("to_column"))
-            .ok()
-            .and_then(|v| v.as_string())
-            .unwrap_or_default();
+        // Extract and validate all required fields
+        let mut fields = Vec::with_capacity(required_fields.len());
+        let mut valid = true;
+
+        for field_name in &required_fields {
+            match js_sys::Reflect::get(&row, &JsValue::from_str(field_name))
+                .ok()
+                .and_then(|v| v.as_string())
+                .filter(|s| !s.is_empty())
+            {
+                Some(value) => fields.push(value),
+                None => {
+                    valid = false;
+                    break;
+                }
+            }
+        }
+
+        if !valid {
+            continue; // Skip rows with missing or empty fields
+        }
 
         foreign_keys.push(ForeignKey {
-            constraint_name,
-            from_schema,
-            from_table,
-            from_column,
-            to_schema,
-            to_table,
-            to_column,
+            constraint_name: fields[0].clone(),
+            from_schema: fields[1].clone(),
+            from_table: fields[2].clone(),
+            from_column: fields[3].clone(),
+            to_schema: fields[4].clone(),
+            to_table: fields[5].clone(),
+            to_column: fields[6].clone(),
         });
     }
 
     let cache = SchemaCache::from_foreign_keys(foreign_keys);
 
-    // Store in global map
-    let mut store = SCHEMA_STORE
-        .lock()
-        .map_err(|e| JsValue::from_str(&format!("Failed to lock schema store: {}", e)))?;
-    store.insert(key, Arc::new(cache));
+    // Store in thread-local map
+    SCHEMA_STORE.with(|store| {
+        store.borrow_mut().insert(key, Arc::new(cache));
+    });
 
     Ok(())
 }
 
 /// Clear a schema cache entry, freeing its memory.
+///
+/// Call this when a tenant is paused or evicted to prevent memory leaks.
+/// If the schema ID does not exist, this is a no-op.
 ///
 /// # Arguments
 ///
@@ -471,19 +486,35 @@ pub async fn init_schema_from_db(
 /// clearSchema("tenant-123");
 /// ```
 #[wasm_bindgen(js_name = clearSchema)]
-pub fn clear_schema(schema_id: &str) -> Result<(), JsValue> {
+pub fn clear_schema(schema_id: &str) {
     let key = if schema_id.is_empty() {
         DEFAULT_SCHEMA_KEY
     } else {
         schema_id
     };
 
-    let mut store = SCHEMA_STORE
-        .lock()
-        .map_err(|e| JsValue::from_str(&format!("Failed to lock schema store: {}", e)))?;
-    store.remove(key);
+    SCHEMA_STORE.with(|store| {
+        store.borrow_mut().remove(key);
+    });
+}
 
-    Ok(())
+/// Clear all schema cache entries, freeing all cached memory.
+///
+/// Useful as a safety net during shutdown or when all tenants are being evicted.
+///
+/// # Example (TypeScript)
+///
+/// ```typescript
+/// import { clearAllSchemas } from './pkg/postgrest_parser.js';
+///
+/// // Clear everything on shutdown
+/// clearAllSchemas();
+/// ```
+#[wasm_bindgen(js_name = clearAllSchemas)]
+pub fn clear_all_schemas() {
+    SCHEMA_STORE.with(|store| {
+        store.borrow_mut().clear();
+    });
 }
 
 #[cfg(test)]
@@ -554,19 +585,37 @@ mod tests {
     #[wasm_bindgen_test]
     fn test_clear_schema() {
         // Store a schema
-        {
-            let cache = SchemaCache::new();
-            let mut store = SCHEMA_STORE.lock().unwrap();
-            store.insert("test-tenant".to_string(), Arc::new(cache));
-        }
+        SCHEMA_STORE.with(|store| {
+            store
+                .borrow_mut()
+                .insert("test-tenant".to_string(), Arc::new(SchemaCache::new()));
+        });
 
         // Verify it exists
         assert!(get_schema_cache(Some("test-tenant")).is_some());
 
         // Clear it
-        clear_schema("test-tenant").unwrap();
+        clear_schema("test-tenant");
 
         // Verify it's gone
         assert!(get_schema_cache(Some("test-tenant")).is_none());
+    }
+
+    #[wasm_bindgen_test]
+    fn test_clear_all_schemas() {
+        // Store multiple schemas
+        SCHEMA_STORE.with(|store| {
+            let mut s = store.borrow_mut();
+            s.insert("tenant-a".to_string(), Arc::new(SchemaCache::new()));
+            s.insert("tenant-b".to_string(), Arc::new(SchemaCache::new()));
+        });
+
+        assert!(get_schema_cache(Some("tenant-a")).is_some());
+        assert!(get_schema_cache(Some("tenant-b")).is_some());
+
+        clear_all_schemas();
+
+        assert!(get_schema_cache(Some("tenant-a")).is_none());
+        assert!(get_schema_cache(Some("tenant-b")).is_none());
     }
 }

@@ -5,7 +5,7 @@
  * the auto-generated WASM bindings, improving developer experience.
  */
 import type { HttpMethod, QueryResult, RequestHeaders, SelectOptions, InsertOptions, UpdateOptions, DeleteOptions, RpcOptions } from "./types.js";
-export { default as init, initSchemaFromDb, clearSchema } from "./postgrest_parser.js";
+export { default as init, initSchemaFromDb, clearSchema, clearAllSchemas } from "./postgrest_parser.js";
 /**
  * Type-safe PostgREST Parser client
  *

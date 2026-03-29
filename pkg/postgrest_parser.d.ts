@@ -76,11 +76,21 @@ export function initSchemaFromDb(schema_id: string, query_executor: Function): P
 /**
  * Clear a schema cache entry, freeing its memory.
  *
+ * Call this when a tenant is paused or evicted to prevent memory leaks.
+ * If the schema ID does not exist, this is a no-op.
+ *
  * # Arguments
  *
  * * `schema_id` - The schema key to remove. If empty, removes "default".
  */
 export function clearSchema(schema_id: string): void;
+
+/**
+ * Clear all schema cache entries, freeing all cached memory.
+ *
+ * Useful as a safety net during shutdown or when all tenants are being evicted.
+ */
+export function clearAllSchemas(): void;
 
 /**
  * Initialize WASM module (call this first from JavaScript)

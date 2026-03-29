@@ -6,7 +6,7 @@
  */
 import { parseRequest as wasmParseRequest, parseInsert as wasmParseInsert, parseUpdate as wasmParseUpdate, parseDelete as wasmParseDelete, parseRpc as wasmParseRpc, parseOnly as wasmParseOnly, buildFilterClause as wasmBuildFilterClause, } from "./postgrest_parser.js";
 // Re-export WASM initialization functions
-export { default as init, initSchemaFromDb, clearSchema } from "./postgrest_parser.js";
+export { default as init, initSchemaFromDb, clearSchema, clearAllSchemas } from "./postgrest_parser.js";
 /**
  * Convert WASM result to typed QueryResult
  */
