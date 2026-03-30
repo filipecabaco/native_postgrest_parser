@@ -672,14 +672,8 @@ mod tests {
     fn test_delete_with_schema_id() {
         let _guard = TestSchema::new("del-tenant", vec![]);
 
-        let result = parse_with_schema(
-            "DELETE",
-            "users",
-            "id=eq.1",
-            None,
-            Some("del-tenant"),
-        )
-        .unwrap();
+        let result =
+            parse_with_schema("DELETE", "users", "id=eq.1", None, Some("del-tenant")).unwrap();
 
         assert!(result.query.contains("DELETE"));
     }
@@ -766,14 +760,8 @@ mod tests {
         );
 
         // None → "default"
-        let result = parse_with_schema(
-            "GET",
-            "posts",
-            "select=title,users(name)",
-            None,
-            None,
-        )
-        .unwrap();
+        let result =
+            parse_with_schema("GET", "posts", "select=title,users(name)", None, None).unwrap();
         assert!(result.query.contains("user_id"));
     }
 
@@ -853,14 +841,7 @@ mod tests {
     #[test]
     fn test_parse_without_schema_id_works() {
         // No schema loaded at all — basic queries still work
-        let result = parse_with_schema(
-            "GET",
-            "users",
-            "age=gte.18&limit=10",
-            None,
-            None,
-        )
-        .unwrap();
+        let result = parse_with_schema("GET", "users", "age=gte.18&limit=10", None, None).unwrap();
 
         assert!(result.query.contains("SELECT"));
         assert!(result.query.contains("users"));
