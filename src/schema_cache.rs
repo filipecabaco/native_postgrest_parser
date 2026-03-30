@@ -231,15 +231,7 @@ mod tests {
 
     #[test]
     fn test_foreign_key_links() {
-        let fk = ForeignKey {
-            from_schema: "public".to_string(),
-            from_table: "orders".to_string(),
-            from_column: "customer_id".to_string(),
-            to_schema: "public".to_string(),
-            to_table: "customers".to_string(),
-            to_column: "id".to_string(),
-            constraint_name: "orders_customer_id_fkey".to_string(),
-        };
+        let fk = ForeignKey::test("orders", "customer_id", "customers", "id");
 
         assert!(fk.links("orders", "customers"));
         assert!(!fk.links("customers", "orders"));
@@ -247,15 +239,7 @@ mod tests {
 
     #[test]
     fn test_join_condition() {
-        let fk = ForeignKey {
-            from_schema: "public".to_string(),
-            from_table: "orders".to_string(),
-            from_column: "customer_id".to_string(),
-            to_schema: "public".to_string(),
-            to_table: "customers".to_string(),
-            to_column: "id".to_string(),
-            constraint_name: "orders_customer_id_fkey".to_string(),
-        };
+        let fk = ForeignKey::test("orders", "customer_id", "customers", "id");
 
         let condition = fk.join_condition("orders", "customers");
         assert_eq!(condition, r#""orders"."customer_id" = "customers"."id""#);

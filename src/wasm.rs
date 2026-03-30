@@ -38,7 +38,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use wasm_bindgen::prelude::*;
 
-use crate::schema_cache::{ForeignKey, SchemaCache};
+use crate::schema_cache::{ForeignKey, SchemaCache, FK_INTROSPECTION_QUERY};
 
 #[cfg(feature = "wasm")]
 use console_error_panic_hook;
@@ -106,6 +106,16 @@ impl WasmQueryResult {
     #[wasm_bindgen(js_name = toJSON)]
     pub fn to_json(&self) -> JsValue {
         serde_wasm_bindgen::to_value(self).unwrap_or(JsValue::NULL)
+    }
+}
+
+impl From<crate::sql::QueryResult> for WasmQueryResult {
+    fn from(r: crate::sql::QueryResult) -> Self {
+        Self {
+            query: r.query,
+            params: r.params,
+            tables: r.tables,
+        }
     }
 }
 
@@ -315,11 +325,7 @@ pub fn parse_request_wasm(
     let result = crate::operation_to_sql_with_cache(path, &operation, cache)
         .map_err(|e| JsValue::from_str(&format!("SQL generation error: {}", e)))?;
 
-    Ok(WasmQueryResult {
-        query: result.query,
-        params: result.params,
-        tables: result.tables,
-    })
+    Ok(result.into())
 }
 
 /// Initialize schema cache from a database query executor.
@@ -371,8 +377,6 @@ pub async fn init_schema_from_db(
         schema_id.to_string()
     };
 
-    use crate::schema_cache::FK_INTROSPECTION_QUERY;
-
     // Call the JavaScript query executor
     let this = JsValue::null();
     let sql_arg = JsValue::from_str(FK_INTROSPECTION_QUERY);
@@ -392,8 +396,8 @@ pub async fn init_schema_from_db(
     let rows_array = js_sys::Array::from(&rows);
     let mut foreign_keys = Vec::new();
 
-    /// Extract a non-empty string field from a JS object, returning None if
-    /// the field is missing, not a string, or empty.
+    // Extract a non-empty string field from a JS object, returning None if
+    // the field is missing, not a string, or empty.
     fn get_string_field(row: &JsValue, name: &str) -> Option<String> {
         js_sys::Reflect::get(row, &JsValue::from_str(name))
             .ok()

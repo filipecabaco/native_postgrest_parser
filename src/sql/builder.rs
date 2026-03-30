@@ -195,32 +195,21 @@ impl QueryBuilder {
 
     fn build_relation_sql(&self, item: &SelectItem) -> Result<String, SqlError> {
         #[cfg(any(feature = "postgres", feature = "wasm"))]
-        let rel_table = &item.name;
+        if let Some(cache) = &self.schema_cache {
+            let rel_table = &item.name;
+            let current_table = self.tables.last().ok_or(SqlError::NoTableContext)?;
 
-        #[cfg(any(feature = "postgres", feature = "wasm"))]
-        {
-            // With schema cache: generate proper JOINs
-            if let Some(cache) = &self.schema_cache {
-                // Get current table (last in tables vec)
-                let current_table = self.tables.last().ok_or(SqlError::NoTableContext)?;
-
-                // Find relationship
-                if let Some(rel) =
-                    cache.find_relationship(&self.current_schema, current_table, rel_table)
-                {
-                    return self.build_relation_with_fk(item, &rel);
-                } else {
-                    // No relationship found - return error with helpful message
-                    return Err(SqlError::RelationNotFound {
-                        from_table: current_table.clone(),
-                        to_table: rel_table.clone(),
-                    });
-                }
-            }
+            return match cache.find_relationship(&self.current_schema, current_table, rel_table) {
+                Some(rel) => self.build_relation_with_fk(item, &rel),
+                None => Err(SqlError::RelationNotFound {
+                    from_table: current_table.clone(),
+                    to_table: rel_table.clone(),
+                }),
+            };
         }
 
-        // Without schema cache: generate placeholder (won't work!)
-        // This maintains backward compatibility but produces invalid SQL
+        // Without schema cache: generate placeholder subquery.
+        // Maintains backward compatibility but produces non-functional SQL.
         self.build_relation_placeholder(item)
     }
 
