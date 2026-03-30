@@ -48,6 +48,8 @@ export function buildFilterClause(filters_json: any): any;
  *
  * # Arguments
  *
+ * * `schema_id` - A unique key to store this schema under (e.g., tenant ID).
+ *   If empty, uses "default".
  * * `query_executor` - An async JavaScript function with signature:
  *   `async (sql: string) => { rows: any[] }`
  *
@@ -65,11 +67,30 @@ export function buildFilterClause(filters_json: any): any;
  *   return { rows: result.rows };
  * };
  *
- * // Initialize schema from database
- * await initSchemaFromDb(queryExecutor);
+ * // Initialize schema for a specific tenant
+ * await initSchemaFromDb("tenant-123", queryExecutor);
  * ```
  */
-export function initSchemaFromDb(query_executor: Function): Promise<void>;
+export function initSchemaFromDb(schema_id: string, query_executor: Function): Promise<void>;
+
+/**
+ * Clear a schema cache entry, freeing its memory.
+ *
+ * Call this when a tenant is paused or evicted to prevent memory leaks.
+ * If the schema ID does not exist, this is a no-op.
+ *
+ * # Arguments
+ *
+ * * `schema_id` - The schema key to remove. If empty, removes "default".
+ */
+export function clearSchema(schema_id: string): void;
+
+/**
+ * Clear all schema cache entries, freeing all cached memory.
+ *
+ * Useful as a safety net during shutdown or when all tenants are being evicted.
+ */
+export function clearAllSchemas(): void;
 
 /**
  * Initialize WASM module (call this first from JavaScript)
@@ -84,16 +105,9 @@ export function init_panic_hook(): void;
  * * `table` - The table name
  * * `query_string` - Query string with filters and optional returning
  * * `headers` - Optional headers as JSON string
- *
- * # Example (TypeScript)
- *
- * ```typescript
- * const result = parseDelete("users", "id=eq.123&returning=id", null);
- * console.log(result.query);   // DELETE FROM "users" WHERE ...
- * console.log(result.params);  // ["123"]
- * ```
+ * * `schema_id` - Optional schema cache key for per-tenant schema resolution
  */
-export function parseDelete(table: string, query_string: string, headers?: string | null): WasmQueryResult;
+export function parseDelete(table: string, query_string: string, headers?: string | null, schema_id?: string | null): WasmQueryResult;
 
 /**
  * Parse and generate SQL for an INSERT operation.
@@ -103,21 +117,10 @@ export function parseDelete(table: string, query_string: string, headers?: strin
  * * `table` - The table name
  * * `body` - JSON body (single object or array of objects)
  * * `query_string` - Optional query string for returning, on_conflict, etc.
- * * `headers` - Optional headers as JSON string (e.g., '{"Prefer":"return=representation"}')
- *
- * # Example (TypeScript)
- *
- * ```typescript
- * const result = parseInsert("users",
- *   JSON.stringify({ name: "Alice", email: "alice@example.com" }),
- *   "on_conflict=email&returning=id,name",
- *   JSON.stringify({ Prefer: "return=representation" })
- * );
- * console.log(result.query);   // INSERT INTO "users" ...
- * console.log(result.params);  // ["Alice", "alice@example.com"]
- * ```
+ * * `headers` - Optional headers as JSON string
+ * * `schema_id` - Optional schema cache key for per-tenant schema resolution
  */
-export function parseInsert(table: string, body: string, query_string?: string | null, headers?: string | null): WasmQueryResult;
+export function parseInsert(table: string, body: string, query_string?: string | null, headers?: string | null, schema_id?: string | null): WasmQueryResult;
 
 /**
  * Parse only the query string without generating SQL.
@@ -141,21 +144,13 @@ export function parseOnly(query_string: string): any;
  *
  * * `table` - The table name to query
  * * `query_string` - The PostgREST query string (e.g., "select=id,name&age=gte.18")
+ * * `schema_id` - Optional schema cache key for per-tenant schema resolution
  *
  * # Returns
  *
  * Returns a `WasmQueryResult` containing the SQL query, parameters, and affected tables.
- *
- * # Example (TypeScript)
- *
- * ```typescript
- * const result = parseQueryString("users", "age=gte.18&status=eq.active");
- * console.log(result.query);   // SELECT * FROM "users" WHERE ...
- * console.log(result.params);  // ["18", "active"]
- * console.log(result.tables);  // ["users"]
- * ```
  */
-export function parseQueryString(table: string, query_string: string): WasmQueryResult;
+export function parseQueryString(table: string, query_string: string, schema_id?: string | null): WasmQueryResult;
 
 /**
  * Parse a complete HTTP request and generate appropriate SQL.
@@ -170,28 +165,9 @@ export function parseQueryString(table: string, query_string: string): WasmQuery
  * * `query_string` - URL query string
  * * `body` - Request body as JSON string (or null)
  * * `headers` - Optional headers as JSON object (for Prefer header)
- *
- * # Example (TypeScript)
- *
- * ```typescript
- * // SELECT query
- * const getResult = parseRequest("GET", "users", "age=gte.18&limit=10", null, null);
- *
- * // INSERT with upsert
- * const postResult = parseRequest("POST", "users", "on_conflict=email",
- *   JSON.stringify({ name: "Alice", email: "alice@example.com" }),
- *   JSON.stringify({ Prefer: "return=representation" })
- * );
- *
- * // RPC call
- * const rpcResult = parseRequest("POST", "rpc/my_function",
- *   "select=result",
- *   JSON.stringify({ arg1: "value" }),
- *   null
- * );
- * ```
+ * * `schema_id` - Optional schema cache key for per-tenant schema resolution
  */
-export function parseRequest(method: string, path: string, query_string: string, body?: string | null, headers?: string | null): WasmQueryResult;
+export function parseRequest(method: string, path: string, query_string: string, body?: string | null, headers?: string | null, schema_id?: string | null): WasmQueryResult;
 
 /**
  * Parse and generate SQL for an RPC (stored procedure/function) call.
@@ -202,20 +178,9 @@ export function parseRequest(method: string, path: string, query_string: string,
  * * `body` - JSON object with function arguments (or null for no args)
  * * `query_string` - Optional query string for filtering/ordering results
  * * `headers` - Optional headers as JSON string
- *
- * # Example (TypeScript)
- *
- * ```typescript
- * const result = parseRpc("calculate_total",
- *   JSON.stringify({ order_id: 123, tax_rate: 0.08 }),
- *   "select=total,tax&limit=1",
- *   null
- * );
- * console.log(result.query);   // SELECT * FROM calculate_total(...)
- * console.log(result.params);  // [123, 0.08]
- * ```
+ * * `schema_id` - Optional schema cache key for per-tenant schema resolution
  */
-export function parseRpc(function_name: string, body?: string | null, query_string?: string | null, headers?: string | null): WasmQueryResult;
+export function parseRpc(function_name: string, body?: string | null, query_string?: string | null, headers?: string | null, schema_id?: string | null): WasmQueryResult;
 
 /**
  * Parse and generate SQL for an UPDATE operation.
@@ -226,20 +191,9 @@ export function parseRpc(function_name: string, body?: string | null, query_stri
  * * `body` - JSON object with fields to update
  * * `query_string` - Query string with filters and optional returning
  * * `headers` - Optional headers as JSON string
- *
- * # Example (TypeScript)
- *
- * ```typescript
- * const result = parseUpdate("users",
- *   JSON.stringify({ status: "active" }),
- *   "id=eq.123&returning=id,status",
- *   null
- * );
- * console.log(result.query);   // UPDATE "users" SET ...
- * console.log(result.params);  // ["active", "123"]
- * ```
+ * * `schema_id` - Optional schema cache key for per-tenant schema resolution
  */
-export function parseUpdate(table: string, body: string, query_string: string, headers?: string | null): WasmQueryResult;
+export function parseUpdate(table: string, body: string, query_string: string, headers?: string | null, schema_id?: string | null): WasmQueryResult;
 
 export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembly.Module;
 
@@ -247,22 +201,20 @@ export interface InitOutput {
     readonly memory: WebAssembly.Memory;
     readonly __wbg_wasmqueryresult_free: (a: number, b: number) => void;
     readonly buildFilterClause: (a: number, b: number) => void;
-    readonly initSchemaFromDb: (a: number) => number;
-    readonly parseDelete: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => void;
-    readonly parseInsert: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number) => void;
+    readonly initSchemaFromDb: (a: number, b: number, c: number) => number;
+    readonly clearSchema: (a: number, b: number) => void;
+    readonly parseDelete: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number) => void;
+    readonly parseInsert: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number) => void;
     readonly parseOnly: (a: number, b: number, c: number) => void;
-    readonly parseQueryString: (a: number, b: number, c: number, d: number, e: number) => void;
-    readonly parseRequest: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number) => void;
-    readonly parseRpc: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number) => void;
-    readonly parseUpdate: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number) => void;
+    readonly parseQueryString: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => void;
+    readonly parseRequest: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number) => void;
+    readonly parseRpc: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number) => void;
+    readonly parseUpdate: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number) => void;
     readonly wasmqueryresult_params: (a: number) => number;
     readonly wasmqueryresult_query: (a: number, b: number) => void;
     readonly wasmqueryresult_tables: (a: number) => number;
     readonly wasmqueryresult_toJSON: (a: number) => number;
     readonly init_panic_hook: () => void;
-    readonly __wasm_bindgen_func_elem_333: (a: number, b: number) => void;
-    readonly __wasm_bindgen_func_elem_409: (a: number, b: number, c: number, d: number) => void;
-    readonly __wasm_bindgen_func_elem_334: (a: number, b: number, c: number) => void;
     readonly __wbindgen_export: (a: number, b: number) => number;
     readonly __wbindgen_export2: (a: number, b: number, c: number, d: number) => number;
     readonly __wbindgen_export3: (a: number) => void;

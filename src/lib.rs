@@ -540,38 +540,75 @@ pub fn parse(
 /// assert!(result.query.contains("SELECT"));
 /// ```
 pub fn operation_to_sql(table: &str, operation: &Operation) -> Result<QueryResult, Error> {
-    // For SELECT operations, use the simple table name
-    // For mutations and RPC, we need to re-resolve the schema
-    // Note: Prefer options are parsed but don't affect SQL generation (future enhancement)
+    #[cfg(any(feature = "postgres", feature = "wasm"))]
+    {
+        operation_to_sql_with_cache(table, operation, None)
+    }
+    #[cfg(not(any(feature = "postgres", feature = "wasm")))]
+    {
+        operation_to_sql_inner(table, operation, QueryBuilder::new)
+    }
+}
+
+/// Converts an Operation to SQL with an optional schema cache for relation resolution.
+///
+/// This variant allows passing a `SchemaCache` for resolving foreign key
+/// relationships in embedded resource queries (e.g., `select=*,posts(*)`)
+/// without requiring the `postgres` feature for database connectivity.
+#[cfg(any(feature = "postgres", feature = "wasm"))]
+pub fn operation_to_sql_with_cache(
+    table: &str,
+    operation: &Operation,
+    schema_cache: Option<std::sync::Arc<schema_cache::SchemaCache>>,
+) -> Result<QueryResult, Error> {
+    let make_builder = move || -> QueryBuilder {
+        let mut builder = QueryBuilder::new();
+        if let Some(cache) = &schema_cache {
+            builder = builder.with_schema_cache(cache.clone());
+        }
+        builder
+    };
+    operation_to_sql_inner(table, operation, make_builder)
+}
+
+fn operation_to_sql_inner(
+    table: &str,
+    operation: &Operation,
+    make_builder: impl Fn() -> QueryBuilder,
+) -> Result<QueryResult, Error> {
     match operation {
-        Operation::Select(params, _prefer) => to_sql(table, params),
+        Operation::Select(params, _prefer) => {
+            if table.is_empty() {
+                return Err(Error::Sql(SqlError::EmptyTableName));
+            }
+            let mut builder = make_builder();
+            builder.build_select(table, params).map_err(Error::Sql)
+        }
         Operation::Insert(params, _prefer) => {
-            // Re-resolve schema for consistency
             let resolved_table = resolve_schema(table, "POST", None)?;
-            let mut builder = QueryBuilder::new();
+            let mut builder = make_builder();
             builder
                 .build_insert(&resolved_table, params)
                 .map_err(Error::Sql)
         }
         Operation::Update(params, _prefer) => {
             let resolved_table = resolve_schema(table, "PATCH", None)?;
-            let mut builder = QueryBuilder::new();
+            let mut builder = make_builder();
             builder
                 .build_update(&resolved_table, params)
                 .map_err(Error::Sql)
         }
         Operation::Delete(params, _prefer) => {
             let resolved_table = resolve_schema(table, "DELETE", None)?;
-            let mut builder = QueryBuilder::new();
+            let mut builder = make_builder();
             builder
                 .build_delete(&resolved_table, params)
                 .map_err(Error::Sql)
         }
         Operation::Rpc(params, _prefer) => {
-            // For RPC, table should be the function name (or "rpc/function_name")
             let function_name = table.strip_prefix("rpc/").unwrap_or(table);
             let resolved_table = resolve_schema(function_name, "POST", None)?;
-            let mut builder = QueryBuilder::new();
+            let mut builder = make_builder();
             builder
                 .build_rpc(&resolved_table, params)
                 .map_err(Error::Sql)
@@ -1926,5 +1963,187 @@ mod tests {
         assert!(parse("POST", "users", "on_conflict=email", Some(body), None).is_ok());
 
         println!("✅ 100% PostgREST Parity Achieved!");
+    }
+
+    #[cfg(any(feature = "postgres", feature = "wasm"))]
+    mod operation_to_sql_with_cache_tests {
+        use super::*;
+        use crate::schema_cache::ForeignKey;
+
+        #[test]
+        fn test_with_cache_none_matches_without_cache() {
+            let op = parse("GET", "users", "id=eq.1", None, None).unwrap();
+
+            let with_cache = operation_to_sql_with_cache("users", &op, None).unwrap();
+            let without_cache = operation_to_sql("users", &op).unwrap();
+
+            assert_eq!(with_cache.query, without_cache.query);
+            assert_eq!(with_cache.params, without_cache.params);
+            assert_eq!(with_cache.tables, without_cache.tables);
+        }
+
+        #[test]
+        fn test_with_cache_select() {
+            let cache = std::sync::Arc::new(
+                crate::schema_cache::SchemaCache::from_foreign_keys(vec![]),
+            );
+            let op = parse("GET", "users", "age=gte.18&limit=5", None, None).unwrap();
+            let result =
+                operation_to_sql_with_cache("users", &op, Some(cache)).unwrap();
+
+            assert!(result.query.contains("SELECT"));
+            assert!(result.query.contains("WHERE"));
+            assert!(result.query.contains("LIMIT"));
+        }
+
+        #[test]
+        fn test_with_cache_insert() {
+            let cache = std::sync::Arc::new(
+                crate::schema_cache::SchemaCache::from_foreign_keys(vec![]),
+            );
+            let body = r#"{"name":"Alice"}"#;
+            let op = parse("POST", "users", "", Some(body), None).unwrap();
+            let result =
+                operation_to_sql_with_cache("users", &op, Some(cache)).unwrap();
+
+            assert!(result.query.contains("INSERT"));
+        }
+
+        #[test]
+        fn test_with_cache_update() {
+            let cache = std::sync::Arc::new(
+                crate::schema_cache::SchemaCache::from_foreign_keys(vec![]),
+            );
+            let body = r#"{"status":"active"}"#;
+            let op = parse("PATCH", "users", "id=eq.1", Some(body), None).unwrap();
+            let result =
+                operation_to_sql_with_cache("users", &op, Some(cache)).unwrap();
+
+            assert!(result.query.contains("UPDATE"));
+        }
+
+        #[test]
+        fn test_with_cache_delete() {
+            let cache = std::sync::Arc::new(
+                crate::schema_cache::SchemaCache::from_foreign_keys(vec![]),
+            );
+            let op = parse("DELETE", "users", "id=eq.1", None, None).unwrap();
+            let result =
+                operation_to_sql_with_cache("users", &op, Some(cache)).unwrap();
+
+            assert!(result.query.contains("DELETE"));
+        }
+
+        #[test]
+        fn test_with_cache_rpc() {
+            let cache = std::sync::Arc::new(
+                crate::schema_cache::SchemaCache::from_foreign_keys(vec![]),
+            );
+            let body = r#"{"user_id": 1}"#;
+            let op =
+                parse("POST", "rpc/get_profile", "", Some(body), None).unwrap();
+            let result = operation_to_sql_with_cache(
+                "rpc/get_profile",
+                &op,
+                Some(cache),
+            )
+            .unwrap();
+
+            assert!(result.query.contains("get_profile"));
+        }
+
+        #[test]
+        fn test_with_cache_empty_table_errors() {
+            let op = parse("GET", "users", "id=eq.1", None, None).unwrap();
+            let result = operation_to_sql_with_cache("", &op, None);
+            assert!(result.is_err());
+        }
+
+        #[test]
+        fn test_with_cache_resolves_many_to_one_relation() {
+            let fks = vec![ForeignKey::test("orders", "customer_id", "customers", "id")];
+            let cache = std::sync::Arc::new(
+                crate::schema_cache::SchemaCache::from_foreign_keys(fks),
+            );
+
+            // select=id,customers(name) on orders table — Many-to-One embed
+            let op = parse(
+                "GET",
+                "orders",
+                "select=id,customers(name)",
+                None,
+                None,
+            )
+            .unwrap();
+            let result =
+                operation_to_sql_with_cache("orders", &op, Some(cache)).unwrap();
+
+            // Should produce a correlated subquery for the M2O relation
+            assert!(result.query.contains("customers"));
+            assert!(result.query.contains("customer_id"));
+        }
+
+        #[test]
+        fn test_with_cache_resolves_one_to_many_relation() {
+            let fks = vec![ForeignKey::test("orders", "customer_id", "customers", "id")];
+            let cache = std::sync::Arc::new(
+                crate::schema_cache::SchemaCache::from_foreign_keys(fks),
+            );
+
+            // select=id,orders(id,total) on customers table — One-to-Many embed
+            let op = parse(
+                "GET",
+                "customers",
+                "select=id,orders(id)",
+                None,
+                None,
+            )
+            .unwrap();
+            let result =
+                operation_to_sql_with_cache("customers", &op, Some(cache))
+                    .unwrap();
+
+            // Should produce a json_agg subquery for the O2M relation
+            assert!(result.query.contains("orders"));
+            assert!(result.query.contains("json_agg"));
+        }
+
+        #[test]
+        fn test_with_cache_relation_not_found_errors() {
+            let cache = std::sync::Arc::new(
+                crate::schema_cache::SchemaCache::from_foreign_keys(vec![]),
+            );
+
+            // Try to embed a relation that doesn't exist in the cache
+            let op = parse(
+                "GET",
+                "orders",
+                "select=id,nonexistent(name)",
+                None,
+                None,
+            )
+            .unwrap();
+            let result =
+                operation_to_sql_with_cache("orders", &op, Some(cache));
+
+            assert!(result.is_err());
+        }
+
+        #[test]
+        fn test_without_cache_relation_uses_placeholder() {
+            // Without a cache, relations produce placeholder SQL
+            let op = parse(
+                "GET",
+                "orders",
+                "select=id,customers(name)",
+                None,
+                None,
+            )
+            .unwrap();
+            let result = operation_to_sql_with_cache("orders", &op, None).unwrap();
+
+            // Should still produce SQL (placeholder mode), not error
+            assert!(result.query.contains("SELECT"));
+        }
     }
 }

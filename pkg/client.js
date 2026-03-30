@@ -6,7 +6,7 @@
  */
 import { parseRequest as wasmParseRequest, parseInsert as wasmParseInsert, parseUpdate as wasmParseUpdate, parseDelete as wasmParseDelete, parseRpc as wasmParseRpc, parseOnly as wasmParseOnly, buildFilterClause as wasmBuildFilterClause, } from "./postgrest_parser.js";
 // Re-export WASM initialization functions
-export { default as init, initSchemaFromDb } from "./postgrest_parser.js";
+export { default as init, initSchemaFromDb, clearSchema, clearAllSchemas } from "./postgrest_parser.js";
 /**
  * Convert WASM result to typed QueryResult
  */
@@ -93,10 +93,15 @@ function buildQueryString(filters, options) {
  * Type-safe PostgREST Parser client
  *
  * Provides strongly-typed methods for generating PostgREST-compatible SQL queries.
+ * Optionally bound to a schema ID for per-tenant schema resolution.
  *
  * @example
  * ```typescript
+ * // Default client (no schema binding)
  * const client = new PostgRESTParser();
+ *
+ * // Per-tenant client with schema binding
+ * const tenantClient = new PostgRESTParser("tenant-123");
  *
  * // SELECT query
  * const getUsers = client.select("users", {
@@ -120,6 +125,23 @@ function buildQueryString(filters, options) {
  */
 export class PostgRESTParser {
     /**
+     * Optional schema ID for per-tenant schema resolution.
+     * When set, all parse calls will use this schema's cached
+     * foreign key information for relation resolution.
+     */
+    schemaId;
+
+    /**
+     * Create a new PostgRESTParser instance.
+     *
+     * @param schemaId - Optional schema cache key for per-tenant schema resolution.
+     *   Must match a key previously passed to `initSchemaFromDb()`.
+     */
+    constructor(schemaId) {
+        this.schemaId = schemaId;
+    }
+
+    /**
      * Parse a complete HTTP request and generate appropriate SQL
      *
      * This is the universal routing method that handles all HTTP methods.
@@ -130,17 +152,11 @@ export class PostgRESTParser {
      * @param body - Request body (object or null)
      * @param headers - Request headers (object or null)
      * @returns Query result with SQL, params, and tables
-     *
-     * @example
-     * ```typescript
-     * const result = client.parseRequest("GET", "users", "age=gte.18", null, null);
-     * const rows = await db.query(result.query, result.params);
-     * ```
      */
     parseRequest(method, path, queryString, body, headers) {
         const bodyJson = body ? JSON.stringify(body) : undefined;
         const headersJson = headers ? headersToJson(headers) : undefined;
-        const result = wasmParseRequest(method, path, queryString, bodyJson, headersJson);
+        const result = wasmParseRequest(method, path, queryString, bodyJson, headersJson, this.schemaId);
         return toQueryResult(result);
     }
     /**
@@ -149,23 +165,13 @@ export class PostgRESTParser {
      * @param table - Table name to query
      * @param options - Query options (filters, ordering, pagination)
      * @returns Query result with SQL, params, and tables
-     *
-     * @example
-     * ```typescript
-     * const result = client.select("users", {
-     *   filters: { "age": "gte.18", "status": "eq.active" },
-     *   order: ["created_at.desc"],
-     *   limit: 10,
-     *   offset: 0
-     * });
-     * ```
      */
     select(table, options = {}) {
         const queryString = buildQueryString(options.filters, options);
         const headers = options.count
             ? { Prefer: `count=${options.count}` }
             : undefined;
-        const result = wasmParseRequest("GET", table, queryString, undefined, headersToJson(headers));
+        const result = wasmParseRequest("GET", table, queryString, undefined, headersToJson(headers), this.schemaId);
         return toQueryResult(result);
     }
     /**
@@ -175,17 +181,6 @@ export class PostgRESTParser {
      * @param data - Data to insert (single object or array of objects)
      * @param options - Insert options (returning, onConflict, prefer)
      * @returns Query result with SQL, params, and tables
-     *
-     * @example
-     * ```typescript
-     * const result = client.insert("users", {
-     *   name: "Alice",
-     *   email: "alice@example.com"
-     * }, {
-     *   returning: "*",
-     *   prefer: { return: "representation" }
-     * });
-     * ```
      */
     insert(table, data, options = {}) {
         const queryString = buildQueryString(undefined, {
@@ -196,7 +191,7 @@ export class PostgRESTParser {
         const headers = preferHeader
             ? { Prefer: preferHeader }
             : undefined;
-        const result = wasmParseInsert(table, JSON.stringify(data), queryString || undefined, headersToJson(headers));
+        const result = wasmParseInsert(table, JSON.stringify(data), queryString || undefined, headersToJson(headers), this.schemaId);
         return toQueryResult(result);
     }
     /**
@@ -209,16 +204,6 @@ export class PostgRESTParser {
      * @param conflictColumns - Columns to use for conflict detection
      * @param options - Upsert options (returning, prefer)
      * @returns Query result with SQL, params, and tables
-     *
-     * @example
-     * ```typescript
-     * const result = client.upsert("users", {
-     *   email: "alice@example.com",
-     *   name: "Alice Updated"
-     * }, ["email"], {
-     *   returning: "*"
-     * });
-     * ```
      */
     upsert(table, data, conflictColumns, options = {}) {
         // Build filters from conflict columns for PUT auto-conflict
@@ -235,7 +220,7 @@ export class PostgRESTParser {
         const headers = preferHeader
             ? { Prefer: preferHeader }
             : undefined;
-        const result = wasmParseRequest("PUT", table, queryString, JSON.stringify(data), headersToJson(headers));
+        const result = wasmParseRequest("PUT", table, queryString, JSON.stringify(data), headersToJson(headers), this.schemaId);
         return toQueryResult(result);
     }
     /**
@@ -246,17 +231,6 @@ export class PostgRESTParser {
      * @param filters - Filter conditions to match rows
      * @param options - Update options (returning, prefer)
      * @returns Query result with SQL, params, and tables
-     *
-     * @example
-     * ```typescript
-     * const result = client.update("users", {
-     *   status: "active"
-     * }, {
-     *   "id": "eq.123"
-     * }, {
-     *   returning: "id,status"
-     * });
-     * ```
      */
     update(table, data, filters, options = {}) {
         const queryString = buildQueryString(filters, {
@@ -266,7 +240,7 @@ export class PostgRESTParser {
         const headers = preferHeader
             ? { Prefer: preferHeader }
             : undefined;
-        const result = wasmParseUpdate(table, JSON.stringify(data), queryString, headersToJson(headers));
+        const result = wasmParseUpdate(table, JSON.stringify(data), queryString, headersToJson(headers), this.schemaId);
         return toQueryResult(result);
     }
     /**
@@ -276,16 +250,6 @@ export class PostgRESTParser {
      * @param filters - Filter conditions to match rows to delete
      * @param options - Delete options (returning, prefer)
      * @returns Query result with SQL, params, and tables
-     *
-     * @example
-     * ```typescript
-     * const result = client.delete("users", {
-     *   "status": "eq.inactive",
-     *   "last_login": "lt.2023-01-01"
-     * }, {
-     *   returning: "id"
-     * });
-     * ```
      */
     delete(table, filters, options = {}) {
         const queryString = buildQueryString(filters, {
@@ -295,7 +259,7 @@ export class PostgRESTParser {
         const headers = preferHeader
             ? { Prefer: preferHeader }
             : undefined;
-        const result = wasmParseDelete(table, queryString, headersToJson(headers));
+        const result = wasmParseDelete(table, queryString, headersToJson(headers), this.schemaId);
         return toQueryResult(result);
     }
     /**
@@ -305,21 +269,10 @@ export class PostgRESTParser {
      * @param args - Function arguments as object
      * @param options - RPC options (select, filters, ordering)
      * @returns Query result with SQL, params, and tables
-     *
-     * @example
-     * ```typescript
-     * const result = client.rpc("calculate_total", {
-     *   order_id: 123,
-     *   tax_rate: 0.08
-     * }, {
-     *   select: ["total", "tax"],
-     *   limit: 1
-     * });
-     * ```
      */
     rpc(functionName, args = {}, options = {}) {
         const queryString = buildQueryString(options.filters, options);
-        const result = wasmParseRpc(functionName, JSON.stringify(args), queryString || undefined, undefined);
+        const result = wasmParseRpc(functionName, JSON.stringify(args), queryString || undefined, undefined, this.schemaId);
         return toQueryResult(result);
     }
     /**
@@ -329,12 +282,6 @@ export class PostgRESTParser {
      *
      * @param queryString - PostgREST query string
      * @returns Parsed query parameters as object
-     *
-     * @example
-     * ```typescript
-     * const parsed = client.parseOnly("age=gte.18&status=eq.active&order=created_at.desc");
-     * console.log(parsed); // { filters: [...], order: [...] }
-     * ```
      */
     parseOnly(queryString) {
         return wasmParseOnly(queryString);
@@ -344,17 +291,6 @@ export class PostgRESTParser {
      *
      * @param filters - Filter conditions as object
      * @returns Object with clause (SQL string) and params (array of values)
-     *
-     * @example
-     * ```typescript
-     * const filters = [
-     *   { column: "age", operator: "gte", value: "18" },
-     *   { column: "status", operator: "eq", value: "active" }
-     * ];
-     * const result = client.buildFilterClause(filters);
-     * console.log(result.clause); // "age >= $1 AND status = $2"
-     * console.log(result.params);  // ["18", "active"]
-     * ```
      */
     buildFilterClause(filters) {
         return wasmBuildFilterClause(filters);
@@ -363,16 +299,23 @@ export class PostgRESTParser {
 /**
  * Create a new PostgREST Parser client instance
  *
+ * @param schemaId - Optional schema cache key for per-tenant schema resolution.
+ *   Must match a key previously passed to `initSchemaFromDb()`.
  * @returns New PostgRESTParser instance
  *
  * @example
  * ```typescript
  * import { createClient } from './pkg/client.js';
  *
+ * // Default client
  * const client = createClient();
+ *
+ * // Per-tenant client
+ * const tenantClient = createClient("tenant-123");
+ *
  * const result = client.select("users", { limit: 10 });
  * ```
  */
-export function createClient() {
-    return new PostgRESTParser();
+export function createClient(schemaId) {
+    return new PostgRESTParser(schemaId);
 }

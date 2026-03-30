@@ -70,7 +70,7 @@ pub struct QueryBuilder {
     /// Tables referenced in the query
     pub tables: Vec<String>,
     /// Optional schema cache for relation resolution
-    #[cfg(feature = "postgres")]
+    #[cfg(any(feature = "postgres", feature = "wasm"))]
     pub schema_cache: Option<std::sync::Arc<crate::schema_cache::SchemaCache>>,
     /// Current schema being queried (for relation resolution)
     pub current_schema: String,
@@ -90,14 +90,14 @@ impl QueryBuilder {
             params: Vec::new(),
             param_index: 0,
             tables: Vec::new(),
-            #[cfg(feature = "postgres")]
+            #[cfg(any(feature = "postgres", feature = "wasm"))]
             schema_cache: None,
             current_schema: "public".to_string(),
         }
     }
 
     /// Sets the schema cache for relation resolution
-    #[cfg(feature = "postgres")]
+    #[cfg(any(feature = "postgres", feature = "wasm"))]
     pub fn with_schema_cache(
         mut self,
         cache: std::sync::Arc<crate::schema_cache::SchemaCache>,
@@ -194,37 +194,26 @@ impl QueryBuilder {
     }
 
     fn build_relation_sql(&self, item: &SelectItem) -> Result<String, SqlError> {
-        #[cfg(feature = "postgres")]
-        let rel_table = &item.name;
+        #[cfg(any(feature = "postgres", feature = "wasm"))]
+        if let Some(cache) = &self.schema_cache {
+            let rel_table = &item.name;
+            let current_table = self.tables.last().ok_or(SqlError::NoTableContext)?;
 
-        #[cfg(feature = "postgres")]
-        {
-            // With schema cache: generate proper JOINs
-            if let Some(cache) = &self.schema_cache {
-                // Get current table (last in tables vec)
-                let current_table = self.tables.last().ok_or(SqlError::NoTableContext)?;
-
-                // Find relationship
-                if let Some(rel) =
-                    cache.find_relationship(&self.current_schema, current_table, rel_table)
-                {
-                    return self.build_relation_with_fk(item, &rel);
-                } else {
-                    // No relationship found - return error with helpful message
-                    return Err(SqlError::RelationNotFound {
-                        from_table: current_table.clone(),
-                        to_table: rel_table.clone(),
-                    });
-                }
-            }
+            return match cache.find_relationship(&self.current_schema, current_table, rel_table) {
+                Some(rel) => self.build_relation_with_fk(item, &rel),
+                None => Err(SqlError::RelationNotFound {
+                    from_table: current_table.clone(),
+                    to_table: rel_table.clone(),
+                }),
+            };
         }
 
-        // Without schema cache: generate placeholder (won't work!)
-        // This maintains backward compatibility but produces invalid SQL
+        // Without schema cache: generate placeholder subquery.
+        // Maintains backward compatibility but produces non-functional SQL.
         self.build_relation_placeholder(item)
     }
 
-    #[cfg(feature = "postgres")]
+    #[cfg(any(feature = "postgres", feature = "wasm"))]
     fn build_relation_with_fk(
         &self,
         item: &SelectItem,
@@ -282,10 +271,10 @@ impl QueryBuilder {
                     self.quote_identifier(rel_table)
                 ))
             }
-            RelationType::ManyToMany { junction_table } => {
+            RelationType::ManyToMany { ref junction_table } => {
                 // TODO: Implement M2M through junction tables
                 Err(SqlError::ManyToManyNotYetSupported {
-                    junction_table: junction_table.to_string(),
+                    junction_table: junction_table.clone(),
                 })
             }
         }
