@@ -371,32 +371,11 @@ pub async fn init_schema_from_db(
         schema_id.to_string()
     };
 
-    // Query for foreign keys from pg_catalog
-    let fk_query = r#"
-        SELECT
-            con.conname AS constraint_name,
-            sn.nspname AS from_schema,
-            sc.relname AS from_table,
-            sa.attname AS from_column,
-            tn.nspname AS to_schema,
-            tc.relname AS to_table,
-            ta.attname AS to_column
-        FROM pg_constraint con
-        JOIN pg_class sc ON sc.oid = con.conrelid
-        JOIN pg_namespace sn ON sn.oid = sc.relnamespace
-        JOIN pg_class tc ON tc.oid = con.confrelid
-        JOIN pg_namespace tn ON tn.oid = tc.relnamespace
-        JOIN pg_attribute sa ON sa.attrelid = sc.oid AND sa.attnum = con.conkey[1]
-        JOIN pg_attribute ta ON ta.attrelid = tc.oid AND ta.attnum = con.confkey[1]
-        WHERE con.contype = 'f'
-          AND sn.nspname NOT IN ('pg_catalog', 'information_schema')
-          AND array_length(con.conkey, 1) = 1
-        ORDER BY sn.nspname, sc.relname, con.conname
-    "#;
+    use crate::schema_cache::FK_INTROSPECTION_QUERY;
 
     // Call the JavaScript query executor
     let this = JsValue::null();
-    let sql_arg = JsValue::from_str(fk_query);
+    let sql_arg = JsValue::from_str(FK_INTROSPECTION_QUERY);
     let promise = query_executor
         .call1(&this, &sql_arg)
         .map_err(|e| JsValue::from_str(&format!("Query executor call failed: {:?}", e)))?;
@@ -412,50 +391,50 @@ pub async fn init_schema_from_db(
 
     let rows_array = js_sys::Array::from(&rows);
     let mut foreign_keys = Vec::new();
-    let required_fields = [
-        "constraint_name",
-        "from_schema",
-        "from_table",
-        "from_column",
-        "to_schema",
-        "to_table",
-        "to_column",
-    ];
+
+    /// Extract a non-empty string field from a JS object, returning None if
+    /// the field is missing, not a string, or empty.
+    fn get_string_field(row: &JsValue, name: &str) -> Option<String> {
+        js_sys::Reflect::get(row, &JsValue::from_str(name))
+            .ok()
+            .and_then(|v| v.as_string())
+            .filter(|s| !s.is_empty())
+    }
 
     for i in 0..rows_array.length() {
         let row = rows_array.get(i);
 
-        // Extract and validate all required fields
-        let mut fields = Vec::with_capacity(required_fields.len());
-        let mut valid = true;
+        // Extract each field by name — skips the row if any field is missing/empty
+        let fk = match (
+            get_string_field(&row, "constraint_name"),
+            get_string_field(&row, "from_schema"),
+            get_string_field(&row, "from_table"),
+            get_string_field(&row, "from_column"),
+            get_string_field(&row, "to_schema"),
+            get_string_field(&row, "to_table"),
+            get_string_field(&row, "to_column"),
+        ) {
+            (
+                Some(constraint_name),
+                Some(from_schema),
+                Some(from_table),
+                Some(from_column),
+                Some(to_schema),
+                Some(to_table),
+                Some(to_column),
+            ) => ForeignKey {
+                constraint_name,
+                from_schema,
+                from_table,
+                from_column,
+                to_schema,
+                to_table,
+                to_column,
+            },
+            _ => continue, // Skip rows with missing or empty fields
+        };
 
-        for field_name in &required_fields {
-            match js_sys::Reflect::get(&row, &JsValue::from_str(field_name))
-                .ok()
-                .and_then(|v| v.as_string())
-                .filter(|s| !s.is_empty())
-            {
-                Some(value) => fields.push(value),
-                None => {
-                    valid = false;
-                    break;
-                }
-            }
-        }
-
-        if !valid {
-            continue; // Skip rows with missing or empty fields
-        }
-
-        foreign_keys.push(ForeignKey {
-            constraint_name: fields[0].clone(),
-            from_schema: fields[1].clone(),
-            from_table: fields[2].clone(),
-            from_column: fields[3].clone(),
-            to_schema: fields[4].clone(),
-            to_table: fields[5].clone(),
-            to_column: fields[6].clone(),
-        });
+        foreign_keys.push(fk);
     }
 
     let cache = SchemaCache::from_foreign_keys(foreign_keys);
@@ -523,30 +502,30 @@ mod tests {
 
     // --- Helpers ---
 
-    fn make_test_fk(
-        from_table: &str,
-        from_col: &str,
-        to_table: &str,
-        to_col: &str,
-    ) -> ForeignKey {
-        ForeignKey {
-            from_schema: "public".to_string(),
-            from_table: from_table.to_string(),
-            from_column: from_col.to_string(),
-            to_schema: "public".to_string(),
-            to_table: to_table.to_string(),
-            to_column: to_col.to_string(),
-            constraint_name: format!("{}_{}_fkey", from_table, from_col),
+    /// RAII guard that removes a schema entry on drop, ensuring cleanup
+    /// even if a test panics.
+    struct TestSchema {
+        id: String,
+    }
+
+    impl TestSchema {
+        fn new(schema_id: &str, fks: Vec<ForeignKey>) -> Self {
+            let cache = SchemaCache::from_foreign_keys(fks);
+            SCHEMA_STORE.with(|store| {
+                store
+                    .borrow_mut()
+                    .insert(schema_id.to_string(), Arc::new(cache));
+            });
+            Self {
+                id: schema_id.to_string(),
+            }
         }
     }
 
-    fn store_test_schema(schema_id: &str, fks: Vec<ForeignKey>) {
-        let cache = SchemaCache::from_foreign_keys(fks);
-        SCHEMA_STORE.with(|store| {
-            store
-                .borrow_mut()
-                .insert(schema_id.to_string(), Arc::new(cache));
-        });
+    impl Drop for TestSchema {
+        fn drop(&mut self) {
+            clear_schema(&self.id);
+        }
     }
 
     /// Parse and generate SQL using the core Rust functions + schema store,
@@ -567,7 +546,7 @@ mod tests {
 
     #[test]
     fn test_clear_schema() {
-        store_test_schema("test-clear", vec![]);
+        let _guard = TestSchema::new("test-clear", vec![]);
         assert!(get_schema_cache(Some("test-clear")).is_some());
 
         clear_schema("test-clear");
@@ -576,8 +555,8 @@ mod tests {
 
     #[test]
     fn test_clear_all_schemas() {
-        store_test_schema("clear-a", vec![]);
-        store_test_schema("clear-b", vec![]);
+        let _a = TestSchema::new("clear-a", vec![]);
+        let _b = TestSchema::new("clear-b", vec![]);
 
         assert!(get_schema_cache(Some("clear-a")).is_some());
         assert!(get_schema_cache(Some("clear-b")).is_some());
@@ -595,7 +574,7 @@ mod tests {
 
     #[test]
     fn test_empty_schema_id_maps_to_default() {
-        store_test_schema("default", vec![]);
+        let _guard = TestSchema::new("default", vec![]);
 
         // None maps to "default"
         assert!(get_schema_cache(None).is_some());
@@ -603,17 +582,15 @@ mod tests {
         // But get_schema_cache with Some("") looks up "" not "default"
         // This tests the raw lookup behavior
         assert!(get_schema_cache(Some("default")).is_some());
-
-        clear_schema("default");
     }
 
     // --- Parse with schema_id: SELECT ---
 
     #[test]
     fn test_select_with_schema_id_resolves_many_to_one() {
-        store_test_schema(
+        let _guard = TestSchema::new(
             "sel-m2o",
-            vec![make_test_fk("orders", "customer_id", "customers", "id")],
+            vec![ForeignKey::test("orders", "customer_id", "customers", "id")],
         );
 
         let result = parse_with_schema(
@@ -627,15 +604,13 @@ mod tests {
 
         assert!(result.query.contains("customers"));
         assert!(result.query.contains("customer_id"));
-
-        clear_schema("sel-m2o");
     }
 
     #[test]
     fn test_select_with_schema_id_resolves_one_to_many() {
-        store_test_schema(
+        let _guard = TestSchema::new(
             "sel-o2m",
-            vec![make_test_fk("orders", "customer_id", "customers", "id")],
+            vec![ForeignKey::test("orders", "customer_id", "customers", "id")],
         );
 
         let result = parse_with_schema(
@@ -649,15 +624,13 @@ mod tests {
 
         assert!(result.query.contains("orders"));
         assert!(result.query.contains("json_agg"));
-
-        clear_schema("sel-o2m");
     }
 
     // --- Parse with schema_id: INSERT ---
 
     #[test]
     fn test_insert_with_schema_id() {
-        store_test_schema("ins-tenant", vec![]);
+        let _guard = TestSchema::new("ins-tenant", vec![]);
 
         let result = parse_with_schema(
             "POST",
@@ -669,15 +642,13 @@ mod tests {
         .unwrap();
 
         assert!(result.query.contains("INSERT"));
-
-        clear_schema("ins-tenant");
     }
 
     // --- Parse with schema_id: UPDATE ---
 
     #[test]
     fn test_update_with_schema_id() {
-        store_test_schema("upd-tenant", vec![]);
+        let _guard = TestSchema::new("upd-tenant", vec![]);
 
         let result = parse_with_schema(
             "PATCH",
@@ -689,15 +660,13 @@ mod tests {
         .unwrap();
 
         assert!(result.query.contains("UPDATE"));
-
-        clear_schema("upd-tenant");
     }
 
     // --- Parse with schema_id: DELETE ---
 
     #[test]
     fn test_delete_with_schema_id() {
-        store_test_schema("del-tenant", vec![]);
+        let _guard = TestSchema::new("del-tenant", vec![]);
 
         let result = parse_with_schema(
             "DELETE",
@@ -709,15 +678,13 @@ mod tests {
         .unwrap();
 
         assert!(result.query.contains("DELETE"));
-
-        clear_schema("del-tenant");
     }
 
     // --- Parse with schema_id: RPC ---
 
     #[test]
     fn test_rpc_with_schema_id() {
-        store_test_schema("rpc-tenant", vec![]);
+        let _guard = TestSchema::new("rpc-tenant", vec![]);
 
         let result = parse_with_schema(
             "POST",
@@ -729,21 +696,19 @@ mod tests {
         .unwrap();
 
         assert!(result.query.contains("my_func"));
-
-        clear_schema("rpc-tenant");
     }
 
     // --- Tenant isolation ---
 
     #[test]
     fn test_two_tenants_different_schemas() {
-        store_test_schema(
+        let _a = TestSchema::new(
             "iso-a",
-            vec![make_test_fk("posts", "author_id", "users", "id")],
+            vec![ForeignKey::test("posts", "author_id", "users", "id")],
         );
-        store_test_schema(
+        let _b = TestSchema::new(
             "iso-b",
-            vec![make_test_fk("orders", "product_id", "products", "id")],
+            vec![ForeignKey::test("orders", "product_id", "products", "id")],
         );
 
         // Tenant A resolves posts->users
@@ -787,15 +752,13 @@ mod tests {
             Some("iso-b"),
         );
         assert!(b_wrong.is_err());
-
-        clear_all_schemas();
     }
 
     #[test]
     fn test_no_schema_id_uses_default_cache() {
-        store_test_schema(
+        let _guard = TestSchema::new(
             "default",
-            vec![make_test_fk("posts", "user_id", "users", "id")],
+            vec![ForeignKey::test("posts", "user_id", "users", "id")],
         );
 
         // None → "default"
@@ -808,17 +771,16 @@ mod tests {
         )
         .unwrap();
         assert!(result.query.contains("user_id"));
-
-        clear_schema("default");
     }
 
     // --- Clear removes resolution ---
 
     #[test]
     fn test_clear_schema_removes_relation_resolution() {
-        store_test_schema(
+        // Don't use TestSchema guard here — we manually clear mid-test
+        let _guard = TestSchema::new(
             "evict-me",
-            vec![make_test_fk("orders", "customer_id", "customers", "id")],
+            vec![ForeignKey::test("orders", "customer_id", "customers", "id")],
         );
 
         // Before clear: resolves
@@ -852,7 +814,7 @@ mod tests {
     fn test_from_foreign_keys_skips_empty_fields() {
         // Simulate what init_schema_from_db validation does:
         // rows with empty fields should be skipped
-        let valid_fk = make_test_fk("orders", "customer_id", "customers", "id");
+        let valid_fk = ForeignKey::test("orders", "customer_id", "customers", "id");
         let invalid_fk = ForeignKey {
             from_schema: "public".to_string(),
             from_table: "".to_string(), // empty — would be skipped by init_schema_from_db

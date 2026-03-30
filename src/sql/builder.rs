@@ -282,10 +282,10 @@ impl QueryBuilder {
                     self.quote_identifier(rel_table)
                 ))
             }
-            RelationType::ManyToMany { junction_table } => {
+            RelationType::ManyToMany { ref junction_table } => {
                 // TODO: Implement M2M through junction tables
                 Err(SqlError::ManyToManyNotYetSupported {
-                    junction_table: junction_table.to_string(),
+                    junction_table: junction_table.clone(),
                 })
             }
         }

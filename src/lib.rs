@@ -540,42 +540,13 @@ pub fn parse(
 /// assert!(result.query.contains("SELECT"));
 /// ```
 pub fn operation_to_sql(table: &str, operation: &Operation) -> Result<QueryResult, Error> {
-    // For SELECT operations, use the simple table name
-    // For mutations and RPC, we need to re-resolve the schema
-    // Note: Prefer options are parsed but don't affect SQL generation (future enhancement)
-    match operation {
-        Operation::Select(params, _prefer) => to_sql(table, params),
-        Operation::Insert(params, _prefer) => {
-            // Re-resolve schema for consistency
-            let resolved_table = resolve_schema(table, "POST", None)?;
-            let mut builder = QueryBuilder::new();
-            builder
-                .build_insert(&resolved_table, params)
-                .map_err(Error::Sql)
-        }
-        Operation::Update(params, _prefer) => {
-            let resolved_table = resolve_schema(table, "PATCH", None)?;
-            let mut builder = QueryBuilder::new();
-            builder
-                .build_update(&resolved_table, params)
-                .map_err(Error::Sql)
-        }
-        Operation::Delete(params, _prefer) => {
-            let resolved_table = resolve_schema(table, "DELETE", None)?;
-            let mut builder = QueryBuilder::new();
-            builder
-                .build_delete(&resolved_table, params)
-                .map_err(Error::Sql)
-        }
-        Operation::Rpc(params, _prefer) => {
-            // For RPC, table should be the function name (or "rpc/function_name")
-            let function_name = table.strip_prefix("rpc/").unwrap_or(table);
-            let resolved_table = resolve_schema(function_name, "POST", None)?;
-            let mut builder = QueryBuilder::new();
-            builder
-                .build_rpc(&resolved_table, params)
-                .map_err(Error::Sql)
-        }
+    #[cfg(any(feature = "postgres", feature = "wasm"))]
+    {
+        operation_to_sql_with_cache(table, operation, None)
+    }
+    #[cfg(not(any(feature = "postgres", feature = "wasm")))]
+    {
+        operation_to_sql_inner(table, operation, QueryBuilder::new)
     }
 }
 
@@ -590,14 +561,21 @@ pub fn operation_to_sql_with_cache(
     operation: &Operation,
     schema_cache: Option<std::sync::Arc<schema_cache::SchemaCache>>,
 ) -> Result<QueryResult, Error> {
-    let make_builder = || -> QueryBuilder {
+    let make_builder = move || -> QueryBuilder {
         let mut builder = QueryBuilder::new();
         if let Some(cache) = &schema_cache {
             builder = builder.with_schema_cache(cache.clone());
         }
         builder
     };
+    operation_to_sql_inner(table, operation, make_builder)
+}
 
+fn operation_to_sql_inner(
+    table: &str,
+    operation: &Operation,
+    make_builder: impl Fn() -> QueryBuilder,
+) -> Result<QueryResult, Error> {
     match operation {
         Operation::Select(params, _prefer) => {
             if table.is_empty() {
@@ -1990,23 +1968,7 @@ mod tests {
     #[cfg(any(feature = "postgres", feature = "wasm"))]
     mod operation_to_sql_with_cache_tests {
         use super::*;
-
-        fn make_fk(
-            from_table: &str,
-            from_col: &str,
-            to_table: &str,
-            to_col: &str,
-        ) -> crate::schema_cache::ForeignKey {
-            crate::schema_cache::ForeignKey {
-                from_schema: "public".to_string(),
-                from_table: from_table.to_string(),
-                from_column: from_col.to_string(),
-                to_schema: "public".to_string(),
-                to_table: to_table.to_string(),
-                to_column: to_col.to_string(),
-                constraint_name: format!("{}_{}_fkey", from_table, from_col),
-            }
-        }
+        use crate::schema_cache::ForeignKey;
 
         #[test]
         fn test_with_cache_none_matches_without_cache() {
@@ -2099,7 +2061,7 @@ mod tests {
 
         #[test]
         fn test_with_cache_resolves_many_to_one_relation() {
-            let fks = vec![make_fk("orders", "customer_id", "customers", "id")];
+            let fks = vec![ForeignKey::test("orders", "customer_id", "customers", "id")];
             let cache = std::sync::Arc::new(
                 crate::schema_cache::SchemaCache::from_foreign_keys(fks),
             );
@@ -2123,7 +2085,7 @@ mod tests {
 
         #[test]
         fn test_with_cache_resolves_one_to_many_relation() {
-            let fks = vec![make_fk("orders", "customer_id", "customers", "id")];
+            let fks = vec![ForeignKey::test("orders", "customer_id", "customers", "id")];
             let cache = std::sync::Arc::new(
                 crate::schema_cache::SchemaCache::from_foreign_keys(fks),
             );
