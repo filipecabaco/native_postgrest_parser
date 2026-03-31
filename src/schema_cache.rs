@@ -147,9 +147,7 @@ impl SchemaCache {
     #[cfg(feature = "postgres")]
     /// Loads schema information from a PostgreSQL database
     pub async fn load_from_database(pool: &PgPool) -> Result<Self, sqlx::Error> {
-        let rows = sqlx::query(FK_INTROSPECTION_QUERY)
-            .fetch_all(pool)
-            .await?;
+        let rows = sqlx::query(FK_INTROSPECTION_QUERY).fetch_all(pool).await?;
 
         let fks: Vec<ForeignKey> = rows
             .iter()
@@ -335,6 +333,8 @@ mod tests {
         let cache = SchemaCache::from_foreign_keys(fks);
 
         // No relationship between customers and products
-        assert!(cache.find_relationship("public", "customers", "products").is_none());
+        assert!(cache
+            .find_relationship("public", "customers", "products")
+            .is_none());
     }
 }
